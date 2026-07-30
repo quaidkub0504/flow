@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>{{ board.name }} — AJD Work</title>
+<link rel="stylesheet" href="/static/css/app.css"/>
+</head>
+<body>
+{% include "_sidebar.html" %}
+<div class="main">
+  <div class="board-topbar">
+    <div class="board-title-row">
+      <span class="board-icon">{{ board.icon }}</span>
+      <span class="board-title" id="boardTitle" contenteditable="true">{{ board.name }}</span>
+    </div>
+    <div class="board-desc">{{ board.description or 'No description' }}</div>
+  </div>
+  <div class="board-scroll" id="boardScroll"></div>
+</div>
+
+<div class="modal-backdrop" id="newColumnModal" style="display:none;">
+  <div class="modal">
+    <div class="modal-hdr">Add Column</div>
+    <input id="newColName" placeholder="Column name" autofocus/>
+    <select id="newColType">
+      <option value="text">Text</option>
+      <option value="long_text">Long Text</option>
+      <option value="status">Status</option>
+      <option value="priority">Priority</option>
+      <option value="person">Person</option>
+      <option value="date">Date</option>
+      <option value="timeline">Timeline</option>
+      <option value="number">Number</option>
+      <option value="dropdown">Dropdown</option>
+      <option value="checkbox">Checkbox</option>
+      <option value="link">Link</option>
+    </select>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeNewColumnModal()">Cancel</button>
+      <button class="btn-primary" onclick="submitNewColumn()">Add</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="newBoardModal" style="display:none;">
+  <div class="modal">
+    <div class="modal-hdr">Create a Board</div>
+    <input id="newBoardName" placeholder="Board name"/>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeNewBoardModal()">Cancel</button>
+      <button class="btn-primary" onclick="submitNewBoard()">Create</button>
+    </div>
+  </div>
+</div>
+
+<div class="updates-panel" id="updatesPanel" style="display:none;"></div>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+const USER = {{ user|tojson }};
+const BOARD_ID = {{ board.id }};
+</script>
+<script src="/static/js/board.js"></script>
+</body>
+</html>

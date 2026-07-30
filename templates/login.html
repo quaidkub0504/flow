@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>AJD Work — Login</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif;}
+  body{background:#f5f6f8;min-height:100vh;display:flex;align-items:center;justify-content:center;}
+  .card{background:#fff;border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,0.08);padding:40px;width:360px;}
+  .logo{font-size:22px;font-weight:900;letter-spacing:1px;color:#1a3a6b;margin-bottom:4px;text-align:center;}
+  .logo span{color:#00c875;}
+  .sub{font-size:13px;color:#676879;margin-bottom:24px;text-align:center;}
+  label{display:block;font-size:12px;font-weight:700;color:#323338;margin:14px 0 6px;}
+  input{width:100%;padding:10px 12px;border:1px solid #d0d4e4;border-radius:8px;font-size:14px;}
+  input:focus{outline:none;border-color:#579bfc;}
+  button{width:100%;margin-top:22px;background:#1a3a6b;color:#fff;border:none;padding:11px;border-radius:8px;
+    font-size:14px;font-weight:700;cursor:pointer;}
+  button:hover{background:#15305a;}
+  .error{color:#e2445c;font-size:12px;margin-top:10px;text-align:center;}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">AJD <span>Work</span></div>
+  <div class="sub">Sign in to your workspace</div>
+  <form id="loginForm">
+    <label>Email</label>
+    <input name="email" type="email" required autofocus/>
+    <label>Password</label>
+    <input name="password" type="password" required/>
+    <button type="submit">Sign In</button>
+    <div class="error" id="err">{{ error or '' }}</div>
+  </form>
+</div>
+<script>
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const r = await fetch('/api/login', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({email: fd.get('email'), password: fd.get('password')})
+  });
+  const d = await r.json();
+  if (d.success) { window.location.href = '/'; }
+  else { document.getElementById('err').textContent = d.error || 'Login failed'; }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>AJD Work</title>
+<link rel="stylesheet" href="/static/css/app.css"/>
+</head>
+<body>
+{% include "_sidebar.html" %}
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-title">My Boards</div>
+    <div class="user-chip" style="background:{{ user.color }};">{{ user.name[0]|upper }}</div>
+  </div>
+  <div class="page-body">
+    <div class="board-grid" id="boardGrid"></div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="newBoardModal" style="display:none;">
+  <div class="modal">
+    <div class="modal-hdr">Create a Board</div>
+    <input id="newBoardName" placeholder="Board name" autofocus/>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeNewBoardModal()">Cancel</button>
+      <button class="btn-primary" onclick="submitNewBoard()">Create</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const USER = {{ user|tojson }};
+
+async function loadBoards(){
+  const r = await fetch('/api/boards');
+  const boards = await r.json();
+  const grid = document.getElementById('boardGrid');
+  if (!boards.length) {
+    grid.innerHTML = `<div class="empty-state">No boards yet — create your first one.</div>`;
+    return;
+  }
+  grid.innerHTML = boards.map(b => `
+    <a class="board-card" href="/board/${b.id}">
+      <div class="board-card-icon">${b.icon}</div>
+      <div class="board-card-name">${esc(b.name)}</div>
+      <div class="board-card-sub">${b.description ? esc(b.description) : 'No description'}</div>
+    </a>
+  `).join('');
+}
+
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function openNewBoardModal(){
+  document.getElementById('newBoardModal').style.display = 'flex';
+  document.getElementById('newBoardName').focus();
+}
+function closeNewBoardModal(){
+  document.getElementById('newBoardModal').style.display = 'none';
+  document.getElementById('newBoardName').value = '';
+}
+async function submitNewBoard(){
+  const name = document.getElementById('newBoardName').value.trim();
+  if (!name) return;
+  const r = await fetch('/api/boards', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name})
+  });
+  const board = await r.json();
+  window.location.href = '/board/' + board.id;
+}
+
+loadBoards();
+</script>
+</body>
+</html>

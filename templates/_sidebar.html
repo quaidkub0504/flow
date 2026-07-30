@@ -1,0 +1,22 @@
+<div class="sidebar">
+  <div class="sidebar-logo"><a href="/" style="color:inherit;text-decoration:none;">AJD <span>Work</span></a></div>
+  <button class="new-board-btn" onclick="openNewBoardModal()">+ New Board</button>
+  <div class="sidebar-section-label">Boards</div>
+  <div id="sidebarBoardList" class="sidebar-board-list"></div>
+  <div class="sidebar-footer">
+    <a href="/logout" class="sidebar-logout">Log out</a>
+  </div>
+</div>
+<script>
+async function loadSidebarBoards(){
+  const r = await fetch('/api/boards');
+  const boards = await r.json();
+  const el = document.getElementById('sidebarBoardList');
+  const currentPath = window.location.pathname;
+  el.innerHTML = boards.map(b => `
+    <a class="sidebar-board-link ${currentPath === '/board/'+b.id ? 'active' : ''}" href="/board/${b.id}">
+      <span class="sb-icon">${b.icon}</span>${b.name.length > 22 ? b.name.slice(0,22)+'…' : b.name}
+    </a>`).join('');
+}
+loadSidebarBoards();
+</script>
