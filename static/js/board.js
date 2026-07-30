@@ -11,6 +11,7 @@ let SELECTED_ITEMS = new Set();
 let DRAG_ITEM_ID = null;
 let DRAG_GROUP_ID = null;
 const GROUP_COLORS = ["#579bfc","#00c875","#fdab3d","#e2445c","#a25ddc","#66ccff","#ff642e","#037f4c"];
+let CALENDAR_VIEW_DATE = new Date();
 
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -182,6 +183,7 @@ function sortValueFor(item, col){
     }
     case 'number': case 'progress': return Number(val.number ?? -Infinity);
     case 'rating': return Number(val.stars ?? -Infinity);
+    case 'time_tracking': return Number(val.total_seconds ?? -Infinity);
     case 'date': return val.date || '';
     case 'checkbox': return val.checked ? 1 : 0;
     case 'long_text': case 'text': return (val.text || '').toLowerCase();
@@ -213,6 +215,7 @@ function render(){
   const view = STATE.views.find(v => v.id === STATE.currentViewId) || STATE.views[0];
   if (!view) { document.getElementById('boardScroll').innerHTML = ''; return; }
   if (view.type === 'kanban') renderKanbanView();
+  else if (view.type === 'calendar') renderCalendarView();
   else renderTableView();
 }
 function renderTabs(){
@@ -384,6 +387,17 @@ function renderCell(item, col){
       }
       return `<div class="cell rating-cell">${starsHtml}</div>`;
     }
+    case 'time_tracking': {
+      const running = !!val.running;
+      const total = Number(val.total_seconds) || 0;
+      const h = Math.floor(total/3600), m = Math.floor((total%3600)/60), s = total%60;
+      const timeStr = `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+      return `<div class="cell time-cell">
+        <button class="time-toggle-btn ${running?'running':''}" title="${running?'Stop':'Start'}"
+                onclick="event.stopPropagation(); toggleTimeTracking(${item.id},${col.id});">${running?'⏸':'▶'}</button>
+        <span class="time-display">${running ? 'Running…' : timeStr}</span>
+      </div>`;
+    }
     case 'link': {
       return `<div class="cell">
         <input type="text" value="${esc(val.url || '')}" placeholder="https://"
@@ -449,6 +463,89 @@ async function addKanbanCard(statusColId, labelId){
   const item = await r.json();
   if (!STATE.items.find(i => i.id === item.id)) STATE.items.push(item);
   if (labelId) await saveValue(item.id, statusColId, {label_id: labelId});
+  render();
+}
+
+// ── Calendar view ─────────────────────────────────────────────────────────
+
+function renderCalendarView(){
+  const container = document.getElementById('boardScroll');
+  const dateCol = STATE.columns.find(c => c.type === 'date');
+  if (!dateCol) {
+    container.innerHTML = `<div class="empty-state">Add a Date column to use the Calendar view.</div>`;
+    return;
+  }
+  const statusCol = STATE.columns.find(c => c.type === 'status');
+  const year = CALENDAR_VIEW_DATE.getFullYear();
+  const month = CALENDAR_VIEW_DATE.getMonth();
+  const startWeekday = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const daysInPrevMonth = new Date(year, month, 0).getDate();
+  const monthLabel = new Date(year, month, 1).toLocaleDateString('en-US', {month:'long', year:'numeric'});
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  const items = applyFilterSearch(STATE.items.slice()).filter(i => (i.values[dateCol.id] || {}).date);
+  const itemsByDate = {};
+  items.forEach(i => {
+    const d = i.values[dateCol.id].date;
+    (itemsByDate[d] = itemsByDate[d] || []).push(i);
+  });
+
+  let cellsHtml = '';
+  for (let i = startWeekday - 1; i >= 0; i--) {
+    cellsHtml += `<div class="cal-cell cal-outside"><div class="cal-daynum">${daysInPrevMonth - i}</div></div>`;
+  }
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const dayItems = itemsByDate[dateStr] || [];
+    cellsHtml += `<div class="cal-cell ${dateStr === todayStr ? 'cal-today' : ''}">
+      <div class="cal-daynum">${day}</div>
+      <div class="cal-items">${dayItems.map(i => renderCalendarChip(i, statusCol)).join('')}</div>
+      <div class="cal-add" onclick="addCalendarItem('${dateStr}', ${dateCol.id})">+ Add</div>
+    </div>`;
+  }
+  const trailing = (7 - ((startWeekday + daysInMonth) % 7)) % 7;
+  for (let i = 1; i <= trailing; i++) {
+    cellsHtml += `<div class="cal-cell cal-outside"><div class="cal-daynum">${i}</div></div>`;
+  }
+
+  container.innerHTML = `
+    <div class="calendar-toolbar">
+      <button class="tb-btn" onclick="calendarNav(-1)">‹ Prev</button>
+      <span class="calendar-month-label">${monthLabel}</span>
+      <button class="tb-btn" onclick="calendarNav(1)">Next ›</button>
+      <button class="tb-btn" onclick="calendarToday()">Today</button>
+    </div>
+    <div class="calendar-grid">
+      ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => `<div class="cal-weekday">${d}</div>`).join('')}
+      ${cellsHtml}
+    </div>`;
+}
+function renderCalendarChip(item, statusCol){
+  let color = '#579bfc';
+  if (statusCol) {
+    const label = (statusCol.settings.labels || []).find(l => l.id === (item.values[statusCol.id] || {}).label_id);
+    if (label) color = label.color;
+  }
+  return `<div class="cal-chip" style="border-left-color:${color};" onclick="event.stopPropagation(); openUpdates(${item.id})">${esc(item.name)}</div>`;
+}
+function calendarNav(delta){
+  CALENDAR_VIEW_DATE = new Date(CALENDAR_VIEW_DATE.getFullYear(), CALENDAR_VIEW_DATE.getMonth() + delta, 1);
+  render();
+}
+function calendarToday(){
+  CALENDAR_VIEW_DATE = new Date();
+  render();
+}
+async function addCalendarItem(dateStr, dateColId){
+  const group = STATE.groups[0];
+  if (!group) return;
+  const r = await fetch(`/api/groups/${group.id}/items`, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name: 'New Item'})
+  });
+  const item = await r.json();
+  if (!STATE.items.find(i => i.id === item.id)) STATE.items.push(item);
+  await saveValue(item.id, dateColId, {date: dateStr});
   render();
 }
 
@@ -659,6 +756,18 @@ async function saveValue(itemId, columnId, value){
   await fetch(`/api/items/${itemId}/values/${columnId}`, {
     method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({value})
   });
+}
+
+async function toggleTimeTracking(itemId, columnId){
+  const item = STATE.items.find(i => i.id === itemId);
+  const val = item.values[columnId] || {};
+  if (val.running) {
+    const elapsed = Math.floor((Date.now() - new Date(val.started_at).getTime()) / 1000);
+    await saveValue(itemId, columnId, {running: false, started_at: null, total_seconds: (val.total_seconds || 0) + elapsed});
+  } else {
+    await saveValue(itemId, columnId, {running: true, started_at: new Date().toISOString(), total_seconds: val.total_seconds || 0});
+  }
+  render();
 }
 
 async function saveItemName(itemId, el){

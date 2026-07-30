@@ -50,6 +50,7 @@ COLUMN_TYPES = {
     "progress": {"label": "Progress"},     # value = {"number": 0-100}, rendered as a filled bar
     "files":    {"label": "Files"},        # value = {"files": [{"id","name","url"}]}
     "rating":   {"label": "Rating"},       # value = {"stars": 0-5}
+    "time_tracking": {"label": "Time Tracking"},  # value = {"running": bool, "started_at": iso|None, "total_seconds": int}
 }
 
 # Starter column/group sets offered in the "New Board" modal — the same
@@ -89,8 +90,9 @@ JOB_TYPE_OPTIONS = [
 # the same way monday.com lets you look at one board as a table, a
 # kanban board, etc.
 VIEW_TYPES = {
-    "table":  {"label": "Table"},
-    "kanban": {"label": "Kanban"},
+    "table":    {"label": "Table"},
+    "kanban":   {"label": "Kanban"},
+    "calendar": {"label": "Calendar"},
 }
 
 # Default status/priority label palettes — every new "status"/"priority"

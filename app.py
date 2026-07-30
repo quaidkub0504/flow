@@ -363,6 +363,9 @@ def _cell_text(column, value, user_names):
         return "; ".join(f.get("url", "") for f in value.get("files", []))
     if t == "link":
         return value.get("url") or ""
+    if t == "time_tracking":
+        secs = int(value.get("total_seconds") or 0)
+        return f"{secs // 3600}:{(secs % 3600) // 60:02d}:{secs % 60:02d}"
     return value.get("text") or ""
 
 
@@ -409,6 +412,8 @@ def _coerce_csv_value(column, raw):
         return {"date": raw.strip()}
     if t == "link":
         return {"url": raw.strip()}
+    if t in ("files", "time_tracking"):
+        return None  # not meaningfully coercible from a single CSV cell
     return {"text": raw}
 
 
