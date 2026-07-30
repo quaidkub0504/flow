@@ -11,9 +11,23 @@ updates live for everyone looking at a board at once.
 """
 
 import os
+import sys
 import csv
 import io
+import smtplib
+import threading
 from datetime import timedelta
+from email.mime.text import MIMEText
+from email.utils import formataddr
+
+# Windows redirects stdout to a non-UTF-8 codepage by default, which crashes
+# any print() containing an emoji (e.g. the startup warnings below) the
+# moment stdout isn't a real console — piped to a file, a process manager,
+# etc. Force UTF-8 so those prints (present and future) can't take the app
+# down before it even starts serving.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from flask import Flask, request, jsonify, render_template, session, redirect, Response
 from flask_socketio import SocketIO, join_room, emit
@@ -47,6 +61,50 @@ app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = bool(os.getenv("PORT"))
+
+# ── Outbound email (assignment / completion notifications) ──────────────
+# Uses plain SMTP so it works with any provider (Gmail app password,
+# Office365, SendGrid/Mailgun SMTP relay, etc.) without a new dependency.
+# Absent config, sends are logged and skipped rather than erroring, so the
+# app runs fine in dev — the feature just switches on the moment real SMTP
+# env vars are set.
+SMTP_HOST = os.getenv("SMTP_HOST")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+SMTP_FROM = os.getenv("SMTP_FROM") or SMTP_USER
+SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "1") != "0"
+APP_BASE_URL = (os.getenv("APP_BASE_URL") or "http://localhost:8788").rstrip("/")
+if not (SMTP_HOST and SMTP_USER and SMTP_PASSWORD):
+    print("⚠️  SMTP_HOST/SMTP_USER/SMTP_PASSWORD not set — email notifications are disabled "
+          "(assignment/completion emails will be logged, not sent). Set them in the environment "
+          "to turn email on.", flush=True)
+
+
+def send_email(to_email, subject, body_text):
+    """Blocking send — call via send_email_async from request handlers so a
+    slow or unreachable SMTP server never holds up the HTTP response."""
+    if not (SMTP_HOST and SMTP_USER and SMTP_PASSWORD):
+        print(f"[email disabled] would send to {to_email}: {subject}", flush=True)
+        return False
+    try:
+        msg = MIMEText(body_text)
+        msg["Subject"] = subject
+        msg["From"] = formataddr(("AJD Work", SMTP_FROM))
+        msg["To"] = to_email
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
+            if SMTP_USE_TLS:
+                server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_FROM, [to_email], msg.as_string())
+        return True
+    except Exception as e:
+        print(f"[email error] failed to send to {to_email}: {e}", flush=True)
+        return False
+
+
+def send_email_async(to_email, subject, body_text):
+    threading.Thread(target=send_email, args=(to_email, subject, body_text), daemon=True).start()
 
 db.init_app(app)
 socketio = SocketIO(app, cors_allowed_origins=[], async_mode="threading")
@@ -929,6 +987,7 @@ def api_bulk_set_value():
         if not item or item.board_id != board_id:
             continue
         cv = ColumnValue.query.filter_by(item_id=iid, column_id=column_id).first()
+        previous_value = cv.value if cv else {}
         if cv is None:
             cv = ColumnValue(item_id=iid, column_id=column_id)
             db.session.add(cv)
@@ -937,6 +996,7 @@ def api_bulk_set_value():
         socketio.emit("value_updated",
                       {"item_id": iid, "column_id": column_id, "value": value, "updated_by": user.to_dict()},
                       room=f"board_{board_id}")
+        _notify_by_email(item, column, previous_value, value, user)
     db.session.add(ActivityLog(board_id=board_id, user_id=user.id, action="changed_value",
                                 detail=f"Bulk-updated {column.name} on {len(ids)} items"))
     db.session.commit()
@@ -957,6 +1017,7 @@ def api_set_value(item_id, column_id):
     new_value = data.get("value", {})
 
     cv = ColumnValue.query.filter_by(item_id=item_id, column_id=column_id).first()
+    previous_value = cv.value if cv else {}
     if cv is None:
         cv = ColumnValue(item_id=item_id, column_id=column_id)
         db.session.add(cv)
@@ -969,7 +1030,43 @@ def api_set_value(item_id, column_id):
     payload = {"item_id": item_id, "column_id": column_id, "value": new_value, "updated_by": user.to_dict()}
     socketio.emit("value_updated", payload, room=f"board_{item.board_id}")
     _run_automations(item, column, new_value)
+    _notify_by_email(item, column, previous_value, new_value, user)
     return jsonify(payload)
+
+
+def _notify_by_email(item, column, previous_value, new_value, actor):
+    """Email people on the two events the business actually cares about:
+    getting handed a new job, and someone finishing one. Deliberately not
+    wired into CSV import (bulk-loading old jobs shouldn't spam anyone)."""
+    board = Board.query.get(item.board_id)
+    link = f"{APP_BASE_URL}/board/{item.board_id}"
+
+    if column.type == "person":
+        newly_assigned = set(new_value.get("user_ids") or []) - set(previous_value.get("user_ids") or [])
+        for uid in newly_assigned:
+            u = User.query.get(uid)
+            if u and u.id != actor.id:
+                send_email_async(
+                    u.email, f"You were assigned: {item.name}",
+                    f"{actor.name} assigned you to \"{item.name}\" on the \"{board.name}\" board.\n\n"
+                    f"View it here: {link}",
+                )
+
+    if column.type in ("status", "priority"):
+        labels = column.settings.get("labels", [])
+        before_label = next((l for l in labels if l["id"] == previous_value.get("label_id")), None)
+        after_label = next((l for l in labels if l["id"] == new_value.get("label_id")), None)
+        before_done = bool(before_label) and before_label["text"].strip().lower() == "done"
+        after_done = bool(after_label) and after_label["text"].strip().lower() == "done"
+        if after_done and not before_done:
+            for u in User.query.filter_by(is_admin=True).all():
+                if u.id == actor.id:
+                    continue
+                send_email_async(
+                    u.email, f"Completed: {item.name}",
+                    f"{actor.name} marked \"{item.name}\" as Done on the \"{board.name}\" board.\n\n"
+                    f"View it here: {link}",
+                )
 
 
 def _run_automations(item, column, value):
@@ -1005,6 +1102,12 @@ def _run_automations(item, column, value):
                 db.session.add(ActivityLog(board_id=item.board_id, item_id=item.id, user_id=notified.id,
                                             action="automation_notify",
                                             detail=f"notified via automation on {column.name}"))
+                board = Board.query.get(item.board_id)
+                send_email_async(
+                    notified.email, f"Automation: {item.name}",
+                    f"An automation on \"{board.name}\" notified you about \"{item.name}\" — {column.name} changed.\n\n"
+                    f"View it here: {APP_BASE_URL}/board/{item.board_id}",
+                )
     db.session.commit()
 
 
