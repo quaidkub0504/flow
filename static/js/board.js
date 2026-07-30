@@ -72,7 +72,18 @@ function connectSocket(){
   });
   socket.on('value_updated', ({item_id, column_id, value}) => {
     const item = STATE.items.find(i => i.id === item_id);
-    if (item) { item.values[column_id] = value; render(); }
+    if (item) {
+      const col = STATE.columns.find(c => c.id === column_id);
+      if (col && col.type === 'person') {
+        const before = new Set((item.values[column_id] || {}).user_ids || []);
+        const after = new Set(value.user_ids || []);
+        if (after.has(USER.id) && !before.has(USER.id)) {
+          fireDesktopNotification('You were assigned', `${item.name} on ${STATE.board.name}`);
+        }
+      }
+      item.values[column_id] = value;
+      render();
+    }
   });
   socket.on('column_created', (col) => {
     if (!STATE.columns.find(c => c.id === col.id)) STATE.columns.push(col);
@@ -143,6 +154,10 @@ function connectSocket(){
   socket.on('update_posted', (upd) => {
     const panel = document.getElementById('updatesPanel');
     if (panel.dataset.itemId == upd.item_id) appendUpdateToPanel(upd);
+    if (upd.user && upd.user.id !== USER.id) {
+      const item = STATE.items.find(i => i.id === upd.item_id);
+      fireDesktopNotification(`New update from ${upd.user.name}`, item ? item.name : 'An item was updated');
+    }
   });
 }
 
@@ -216,6 +231,7 @@ function render(){
   if (!view) { document.getElementById('boardScroll').innerHTML = ''; return; }
   if (view.type === 'kanban') renderKanbanView();
   else if (view.type === 'calendar') renderCalendarView();
+  else if (view.type === 'dashboard') renderDashboardView();
   else renderTableView();
 }
 function renderTabs(){
@@ -547,6 +563,68 @@ async function addCalendarItem(dateStr, dateColId){
   if (!STATE.items.find(i => i.id === item.id)) STATE.items.push(item);
   await saveValue(item.id, dateColId, {date: dateStr});
   render();
+}
+
+// ── Dashboard view ────────────────────────────────────────────────────────
+
+function renderDashboardView(){
+  const container = document.getElementById('boardScroll');
+  const statusCol = STATE.columns.find(c => c.type === 'status');
+  const priorityCol = STATE.columns.find(c => c.type === 'priority');
+  const personCol = STATE.columns.find(c => c.type === 'person');
+  const numberCols = STATE.columns.filter(c => c.type === 'number' || c.type === 'progress');
+  const items = STATE.items;
+
+  const kpis = [`<div class="dash-kpi"><div class="dash-kpi-num">${items.length}</div><div class="dash-kpi-label">Total Items</div></div>`]
+    .concat(numberCols.map(c => {
+      const sum = items.reduce((acc,i) => acc + (Number((i.values[c.id]||{}).number) || 0), 0);
+      return `<div class="dash-kpi"><div class="dash-kpi-num">${sum}${c.type==='progress'?'%':''}</div><div class="dash-kpi-label">${esc(c.name)} total</div></div>`;
+    }));
+
+  let cards = '';
+  if (statusCol) cards += renderDashDistribution('Status Breakdown', statusCol, items);
+  if (priorityCol) cards += renderDashDistribution('Priority Breakdown', priorityCol, items);
+  if (personCol) cards += renderDashWorkload(personCol, items);
+
+  if (!statusCol && !priorityCol && !personCol && !numberCols.length) {
+    container.innerHTML = `<div class="empty-state">Add a Status, Priority, Person, or Number column to see reporting here.</div>`;
+    return;
+  }
+  container.innerHTML = `
+    <div class="dash-kpi-row">${kpis.join('')}</div>
+    <div class="dashboard-grid">${cards}</div>`;
+}
+function renderDashDistribution(title, col, items){
+  const labels = col.settings.labels || [];
+  const counts = labels.map(l => items.filter(i => (i.values[col.id]||{}).label_id === l.id).length);
+  const noneCount = items.filter(i => !(i.values[col.id]||{}).label_id).length;
+  const max = Math.max(1, ...counts, noneCount);
+  let rows = labels.map((l, idx) => dashBarRow(l.text, l.color, counts[idx], max)).join('');
+  if (noneCount) rows += dashBarRow(`No ${col.name}`, 'var(--pill-empty)', noneCount, max);
+  return `<div class="dash-card"><div class="dash-card-title">${esc(title)}</div>${rows}</div>`;
+}
+function renderDashWorkload(personCol, items){
+  const counts = {};
+  items.forEach(i => {
+    const ids = (i.values[personCol.id] || {}).user_ids || [];
+    if (!ids.length) counts.__unassigned = (counts.__unassigned || 0) + 1;
+    ids.forEach(uid => { counts[uid] = (counts[uid] || 0) + 1; });
+  });
+  const entries = Object.entries(counts).map(([k, v]) => {
+    if (k === '__unassigned') return {name: 'Unassigned', color: 'var(--pill-empty)', count: v};
+    const u = ALL_USERS.find(x => x.id === Number(k));
+    return {name: u ? u.name : 'Unknown', color: u ? u.color : 'var(--pill-empty)', count: v};
+  }).sort((a, b) => b.count - a.count);
+  const max = Math.max(1, ...entries.map(e => e.count));
+  const rows = entries.map(e => dashBarRow(e.name, e.color, e.count, max)).join('');
+  return `<div class="dash-card"><div class="dash-card-title">Workload by Person</div>${rows || '<div class="empty-state" style="padding:12px;">No one assigned yet.</div>'}</div>`;
+}
+function dashBarRow(label, color, count, max){
+  return `<div class="dash-bar-row">
+    <span class="dash-bar-label">${esc(label)}</span>
+    <div class="dash-bar-track"><div class="dash-bar-fill" style="width:${(count/max*100)}%;background:${color};"></div></div>
+    <span class="dash-bar-count">${count}</span>
+  </div>`;
 }
 
 // ── Drag-and-drop reordering (items + groups) ────────────────────────────

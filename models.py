@@ -90,9 +90,10 @@ JOB_TYPE_OPTIONS = [
 # the same way monday.com lets you look at one board as a table, a
 # kanban board, etc.
 VIEW_TYPES = {
-    "table":    {"label": "Table"},
-    "kanban":   {"label": "Kanban"},
-    "calendar": {"label": "Calendar"},
+    "table":     {"label": "Table"},
+    "kanban":    {"label": "Kanban"},
+    "calendar":  {"label": "Calendar"},
+    "dashboard": {"label": "Dashboard"},
 }
 
 # Default status/priority label palettes — every new "status"/"priority"

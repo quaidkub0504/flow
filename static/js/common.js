@@ -70,6 +70,36 @@ function undoToast(id){
   pending.onUndo();
 }
 
+// ── Desktop notifications ─────────────────────────────────────────────────
+function initNotificationBanner(){
+  if (!('Notification' in window)) return;
+  if (Notification.permission !== 'default') return;
+  if (localStorage.getItem('ajdwork_notif_dismissed') === '1') return;
+  const banner = document.createElement('div');
+  banner.className = 'notif-banner';
+  banner.innerHTML = `
+    <span>Enable desktop notifications on this computer</span>
+    <button onclick="enableDesktopNotifications()">Enable now</button>
+    <span class="notif-banner-close" onclick="dismissNotifBanner()">✕</span>`;
+  document.body.prepend(banner);
+}
+async function enableDesktopNotifications(){
+  await Notification.requestPermission();
+  dismissNotifBanner();
+}
+function dismissNotifBanner(){
+  localStorage.setItem('ajdwork_notif_dismissed', '1');
+  const b = document.querySelector('.notif-banner');
+  if (b) b.remove();
+}
+function fireDesktopNotification(title, body){
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  if (!document.hidden) return;  // only pop up when the tab isn't the one you're looking at
+  try { new Notification(title, {body, icon: '/static/img/logo.png'}); } catch (e) {}
+}
+if (document.readyState !== 'loading') initNotificationBanner();
+else document.addEventListener('DOMContentLoaded', initNotificationBanner);
+
 // ── Shared "New Board" template select (used by home.html and board.html) ─
 async function populateBoardTemplateSelect(){
   const sel = document.getElementById('newBoardTemplate');
