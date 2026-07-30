@@ -67,8 +67,17 @@ function connectSocket(){
   });
 }
 
+let SEARCH_QUERY = '';
+function setSearchQuery(q){ SEARCH_QUERY = q.trim().toLowerCase(); render(); }
+function focusFirstAddItem(){
+  const el = document.querySelector('.add-item-input');
+  if (el) el.focus();
+}
+
 function itemsForGroup(groupId){
-  return STATE.items.filter(i => i.group_id === groupId).sort((a,b) => a.position - b.position);
+  return STATE.items.filter(i => i.group_id === groupId)
+    .filter(i => !SEARCH_QUERY || i.name.toLowerCase().includes(SEARCH_QUERY))
+    .sort((a,b) => a.position - b.position);
 }
 
 function render(){
@@ -130,14 +139,14 @@ function renderCell(item, col){
       const labels = col.settings.labels || [];
       const label = labels.find(l => l.id === val.label_id);
       return `<div class="cell" onclick="openLabelPicker(event, ${item.id}, ${col.id})">
-        ${label ? `<span class="pill" style="background:${label.color};">${esc(label.text)}</span>` : `<span class="pill empty">Empty</span>`}
+        ${label ? `<span class="pill" style="background:${label.color};">${esc(label.text)}</span>` : `<span class="pill empty"></span>`}
       </div>`;
     }
     case 'person': {
       const ids = val.user_ids || [];
       const users = ids.map(uid => ALL_USERS.find(u => u.id === uid)).filter(Boolean);
       return `<div class="cell" onclick="openPersonPicker(event, ${item.id}, ${col.id})">
-        ${users.length ? `<div class="avatar-stack">${users.map(u => `<div class="avatar" style="background:${u.color};" title="${esc(u.name)}">${esc(u.name[0].toUpperCase())}</div>`).join('')}</div>` : `<span class="pill empty">+</span>`}
+        ${users.length ? `<div class="avatar-stack">${users.map(u => `<div class="avatar" style="background:${u.color};" title="${esc(u.name)}">${esc(u.name[0].toUpperCase())}</div>`).join('')}</div>` : `<div class="avatar avatar-placeholder">+</div>`}
       </div>`;
     }
     case 'date': {
@@ -157,6 +166,13 @@ function renderCell(item, col){
       return `<div class="cell">
         <input type="number" value="${val.number ?? ''}"
                onchange="saveValue(${item.id},${col.id},{number:this.value===''?null:Number(this.value)})"/>
+      </div>`;
+    }
+    case 'progress': {
+      const pct = Math.max(0, Math.min(100, Number(val.number) || 0));
+      return `<div class="cell progress-cell" onclick="openProgressEditor(event, ${item.id}, ${col.id}, ${pct})">
+        <div class="progress-track"><div class="progress-fill" style="width:${pct}%;"></div></div>
+        <span class="progress-label">${pct}%</span>
       </div>`;
     }
     case 'checkbox': {
@@ -342,9 +358,9 @@ function openDropdownPicker(evt, itemId, columnId){
     <div class="picker-option ${current.has(o.id) ? 'selected' : ''}" onclick="toggleDropdownOption(${itemId},${columnId},'${o.id}')">${esc(o.text)}</div>
   `).join('');
   picker.innerHTML = `<div id="dropdownOptsList">${renderOpts()}</div>
-    <div style="display:flex;gap:4px;padding:6px;border-top:1px solid #f0f1f4;margin-top:4px;">
-      <input id="newDropdownOpt" placeholder="Add option" style="flex:1;border:1px solid #d0d4e4;border-radius:6px;padding:5px 8px;font-size:12px;"/>
-      <button onclick="addDropdownOption(${columnId})" style="border:none;background:#1a3a6b;color:#fff;border-radius:6px;padding:0 10px;cursor:pointer;">+</button>
+    <div style="display:flex;gap:4px;padding:6px;border-top:1px solid var(--border);margin-top:4px;">
+      <input id="newDropdownOpt" placeholder="Add option" style="flex:1;border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:12px;background:var(--bg-app);color:var(--text);"/>
+      <button onclick="addDropdownOption(${columnId})" style="border:none;background:var(--accent-blue);color:#fff;border-radius:6px;padding:0 10px;cursor:pointer;">+</button>
     </div>`;
   evt.currentTarget.appendChild(picker);
 }
@@ -368,6 +384,25 @@ async function addDropdownOption(columnId){
   });
   const updated = await r.json();
   col.settings = updated.settings;
+  closePicker();
+  render();
+}
+
+function openProgressEditor(evt, itemId, columnId, currentPct){
+  evt.stopPropagation();
+  closePicker();
+  const picker = document.createElement('div');
+  picker.className = 'picker progress-picker';
+  picker.innerHTML = `
+    <input id="progressInput" type="number" min="0" max="100" value="${currentPct}"/>
+    <button onclick="saveProgress(${itemId},${columnId})">Set</button>`;
+  evt.currentTarget.appendChild(picker);
+  document.getElementById('progressInput').focus();
+}
+function saveProgress(itemId, columnId){
+  const input = document.getElementById('progressInput');
+  const pct = Math.max(0, Math.min(100, Number(input.value) || 0));
+  saveValue(itemId, columnId, {number: pct});
   closePicker();
   render();
 }

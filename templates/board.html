@@ -16,6 +16,16 @@
     </div>
     <div class="board-desc">{{ board.description or 'No description' }}</div>
   </div>
+  <div class="board-tabs">
+    <span class="board-tab active">Main table</span>
+  </div>
+  <div class="board-toolbar">
+    <button class="btn-new-item" onclick="focusFirstAddItem()">+ New item</button>
+    <div class="toolbar-search">
+      <span class="toolbar-search-icon">⌕</span>
+      <input id="boardSearch" placeholder="Search" oninput="setSearchQuery(this.value)"/>
+    </div>
+  </div>
   <div class="board-scroll" id="boardScroll"></div>
 </div>
 
@@ -32,6 +42,7 @@
       <option value="date">Date</option>
       <option value="timeline">Timeline</option>
       <option value="number">Number</option>
+      <option value="progress">Progress</option>
       <option value="dropdown">Dropdown</option>
       <option value="checkbox">Checkbox</option>
       <option value="link">Link</option>

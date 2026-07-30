@@ -47,6 +47,7 @@ COLUMN_TYPES = {
     "checkbox": {"label": "Checkbox"},     # value = {"checked": bool}
     "link":     {"label": "Link"},         # value = {"url": "...", "text": "..."}
     "priority": {"label": "Priority"},     # same shape as status, distinct color palette convention
+    "progress": {"label": "Progress"},     # value = {"number": 0-100}, rendered as a filled bar
 }
 
 # Default status/priority label palettes — every new "status"/"priority"
