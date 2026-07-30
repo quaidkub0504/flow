@@ -61,6 +61,7 @@
       <option value="checkbox">Checkbox</option>
       <option value="link">Link</option>
       <option value="files">Files</option>
+      <option value="rating">Rating</option>
     </select>
     <div class="modal-actions">
       <button class="btn-ghost" onclick="closeNewColumnModal()">Cancel</button>
@@ -73,9 +74,26 @@
   <div class="modal">
     <div class="modal-hdr">Create a Board</div>
     <input id="newBoardName" placeholder="Board name"/>
+    <select id="newBoardTemplate"></select>
     <div class="modal-actions">
       <button class="btn-ghost" onclick="closeNewBoardModal()">Cancel</button>
       <button class="btn-primary" onclick="submitNewBoard()">Create</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="importCsvModal" style="display:none;">
+  <div class="modal">
+    <div class="modal-hdr">Import CSV</div>
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">
+      First column becomes the item name. Other column headers match existing board columns by name — anything
+      unmatched is added as a new text column automatically.
+    </div>
+    <input type="file" id="importCsvFile" accept=".csv" onchange="readImportFile(this)"/>
+    <div id="importCsvStatus" style="font-size:12px;color:var(--text-faint);margin:8px 0;"></div>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeImportCSVModal()">Cancel</button>
+      <button class="btn-primary" onclick="submitImportCSV()">Import</button>
     </div>
   </div>
 </div>

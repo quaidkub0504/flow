@@ -49,7 +49,41 @@ COLUMN_TYPES = {
     "priority": {"label": "Priority"},     # same shape as status, distinct color palette convention
     "progress": {"label": "Progress"},     # value = {"number": 0-100}, rendered as a filled bar
     "files":    {"label": "Files"},        # value = {"files": [{"id","name","url"}]}
+    "rating":   {"label": "Rating"},       # value = {"stars": 0-5}
 }
+
+# Starter column/group sets offered in the "New Board" modal — the same
+# seed logic monday.com itself uses (a brand-new board isn't just an empty
+# grid, it's pre-shaped for a job).
+BOARD_TEMPLATES = {
+    "blank": {
+        "label": "Blank board",
+        "group": "Group Title",
+        "columns": [("Status", "status"), ("Person", "person"), ("Date", "date")],
+    },
+    "service_call": {
+        "label": "Service Call Tracker",
+        "group": "Scheduled Jobs",
+        "columns": [("Status", "status"), ("Priority", "priority"), ("Technician", "person"),
+                    ("Scheduled Date", "date"), ("Address", "text"),
+                    ("Job Type", "dropdown"), ("Estimated Cost", "number")],
+    },
+    "crm": {
+        "label": "CRM / Leads",
+        "group": "Leads",
+        "columns": [("Status", "status"), ("Owner", "person"), ("Priority", "priority"),
+                    ("Follow-up Date", "date"), ("Company", "text"), ("Website", "link")],
+    },
+    "tasks": {
+        "label": "Task List",
+        "group": "To Do",
+        "columns": [("Status", "status"), ("Assignee", "person"), ("Due Date", "date"), ("Priority", "priority")],
+    },
+}
+JOB_TYPE_OPTIONS = [
+    {"id": "1", "text": "Plumbing"}, {"id": "2", "text": "Heating"},
+    {"id": "3", "text": "Cooling"}, {"id": "4", "text": "Electrical"},
+]
 
 # Board view types — a board can have several views over the same items,
 # the same way monday.com lets you look at one board as a table, a

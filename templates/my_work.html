@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>My Work — AJD Work</title>
+<link rel="icon" href="/static/img/logo.png"/>
+<link rel="stylesheet" href="/static/css/app.css"/>
+</head>
+<body>
+{% include "_sidebar.html" %}
+<div class="main">
+  {% include "_topbar.html" %}
+  <div class="page-body">
+    <div class="page-section-hdr">🗂 My Work</div>
+    <div id="myWorkList"></div>
+  </div>
+</div>
+<script src="/static/js/common.js"></script>
+<script>
+async function loadMyWork(){
+  const rows = await fetch('/api/my_work').then(r => r.json());
+  const el = document.getElementById('myWorkList');
+  if (!rows.length) {
+    el.innerHTML = `<div class="empty-state">Nothing assigned to you right now.</div>`;
+    return;
+  }
+  el.innerHTML = `
+    <table class="board-table" style="width:100%;">
+      <thead><tr><th style="min-width:260px;">Item</th><th>Board</th><th>Status</th><th>Due</th></tr></thead>
+      <tbody>
+        ${rows.map(r => `
+          <tr>
+            <td class="item-name-cell" style="border-left:none;">
+              <a href="/board/${r.board_id}" style="color:inherit;text-decoration:none;">${esc_(r.item_name)}</a>
+            </td>
+            <td style="padding:9px 12px;">
+              <a href="/board/${r.board_id}" style="color:var(--text-dim);text-decoration:none;font-size:13px;">${esc_(r.board_name)}</a>
+            </td>
+            <td style="padding:9px 12px;">
+              ${r.status ? `<span class="pill" style="background:${r.status.color};display:inline-block;width:auto;padding:0 10px;">${esc_(r.status.text)}</span>` : ''}
+            </td>
+            <td style="padding:9px 12px;font-size:13px;color:var(--text-dim);font-variant-numeric:tabular-nums;">${r.due_date || ''}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+loadMyWork();
+</script>
+</body>
+</html>

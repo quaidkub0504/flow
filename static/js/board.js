@@ -50,13 +50,6 @@ async function init(){
       closeAllMenus();
     }
   });
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
-    closePicker();
-    closeAllMenus();
-    closeUpdates();
-    document.querySelectorAll('.modal-backdrop').forEach(m => { m.style.display = 'none'; });
-  });
 }
 
 function connectSocket(){
@@ -188,6 +181,7 @@ function sortValueFor(item, col){
       return idx;
     }
     case 'number': case 'progress': return Number(val.number ?? -Infinity);
+    case 'rating': return Number(val.stars ?? -Infinity);
     case 'date': return val.date || '';
     case 'checkbox': return val.checked ? 1 : 0;
     case 'long_text': case 'text': return (val.text || '').toLowerCase();
@@ -382,6 +376,14 @@ function renderCell(item, col){
         ${files.length ? files.map(f => `<a class="file-chip" href="${esc(f.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation();">📎 ${esc(f.name)}</a>`).join('') : `<span class="pill empty"></span>`}
       </div>`;
     }
+    case 'rating': {
+      const stars = Math.max(0, Math.min(5, Number(val.stars) || 0));
+      let starsHtml = '';
+      for (let i = 1; i <= 5; i++) {
+        starsHtml += `<span class="rating-star ${i<=stars?'lit':''}" onclick="event.stopPropagation(); saveValue(${item.id},${col.id},{stars:${i}}); render();">★</span>`;
+      }
+      return `<div class="cell rating-cell">${starsHtml}</div>`;
+    }
     case 'link': {
       return `<div class="cell">
         <input type="text" value="${esc(val.url || '')}" placeholder="https://"
@@ -554,12 +556,18 @@ function renderBulkBar(){
 }
 function bulkDelete(){
   const ids = Array.from(SELECTED_ITEMS);
-  confirmAction('Delete items', `Delete ${ids.length} item(s)? This can't be undone.`, 'Delete', async () => {
+  const items = STATE.items.filter(i => ids.includes(i.id));
+  STATE.items = STATE.items.filter(i => !ids.includes(i.id));
+  SELECTED_ITEMS.clear();
+  renderBulkBar();
+  render();
+  showUndoToast(`Deleted ${ids.length} item${ids.length===1?'':'s'}`, () => {
+    STATE.items.push(...items);
+    render();
+  }, async () => {
     await fetch('/api/items/bulk_delete', {
       method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ids})
     });
-    SELECTED_ITEMS.clear();
-    renderBulkBar();
   });
 }
 async function bulkDuplicate(){
@@ -630,7 +638,15 @@ async function duplicateGroup(groupId){
 function confirmDeleteGroup(groupId){
   closeAllMenus();
   const group = STATE.groups.find(g => g.id === groupId);
-  confirmAction('Delete group', `Delete "${group.name}" and all its items? This can't be undone.`, 'Delete', async () => {
+  const groupItems = STATE.items.filter(i => i.group_id === groupId);
+  STATE.groups = STATE.groups.filter(g => g.id !== groupId);
+  STATE.items = STATE.items.filter(i => i.group_id !== groupId);
+  render();
+  showUndoToast(`Deleted group "${group.name}"`, () => {
+    STATE.groups.push(group);
+    STATE.items.push(...groupItems);
+    render();
+  }, async () => {
     await fetch(`/api/groups/${groupId}`, {method: 'DELETE'});
   });
 }
@@ -754,7 +770,12 @@ async function duplicateColumn(colId){
 function confirmDeleteColumn(colId){
   closeAllMenus();
   const col = STATE.columns.find(c => c.id === colId);
-  confirmAction('Delete column', `Delete "${col.name}" and all its values? This can't be undone.`, 'Delete', async () => {
+  STATE.columns = STATE.columns.filter(c => c.id !== colId);
+  render();
+  showUndoToast(`Deleted column "${col.name}"`, () => {
+    STATE.columns.push(col);
+    render();
+  }, async () => {
     await fetch(`/api/columns/${colId}`, {method: 'DELETE'});
   });
 }
@@ -776,7 +797,12 @@ async function duplicateItemRow(itemId){
 function confirmDeleteItem(itemId){
   closeAllMenus();
   const item = STATE.items.find(i => i.id === itemId);
-  confirmAction('Delete item', `Delete "${item.name}"? This can't be undone.`, 'Delete', async () => {
+  STATE.items = STATE.items.filter(i => i.id !== itemId);
+  render();
+  showUndoToast(`Deleted "${item.name}"`, () => {
+    STATE.items.push(item);
+    render();
+  }, async () => {
     await fetch(`/api/items/${itemId}`, {method: 'DELETE'});
   });
 }
@@ -799,6 +825,8 @@ async function openBoardSettingsMenu(evt){
     <div class="menu-item" onclick="closeAllMenus(); openAutomationsModal();">⚡ Automations</div>
     <div class="menu-sep"></div>
     <div class="menu-item" onclick="duplicateBoardFromPage()">⎘ Duplicate board</div>
+    <div class="menu-item" onclick="closeAllMenus(); exportBoardCSV();">⬇ Export to CSV</div>
+    <div class="menu-item" onclick="closeAllMenus(); openImportCSVModal();">⬆ Import CSV</div>
     <div class="menu-sep"></div>
     <div class="filter-col-name" style="padding:6px 10px 2px;">Move to folder</div>
     <div class="menu-item" onclick="moveBoardToFolder(null)">— No folder</div>
@@ -834,18 +862,6 @@ function confirmDeleteBoard(){
     window.location.href = '/';
   });
 }
-
-// ── Confirm modal (replaces native confirm() everywhere in this app) ─────
-
-function confirmAction(title, body, okLabel, onConfirm){
-  document.getElementById('confirmModalHdr').textContent = title;
-  document.getElementById('confirmModalBody').textContent = body;
-  const okBtn = document.getElementById('confirmModalOkBtn');
-  okBtn.textContent = okLabel || 'Delete';
-  okBtn.onclick = () => { closeConfirmModal(); onConfirm(); };
-  document.getElementById('confirmModal').style.display = 'flex';
-}
-function closeConfirmModal(){ document.getElementById('confirmModal').style.display = 'none'; }
 
 // ── Filter / Sort / Hide toolbar panels ──────────────────────────────────
 
@@ -971,7 +987,10 @@ async function submitNewColumn(){
 }
 
 // New-board modal (sidebar's "+ New Board" also works from inside a board page)
-function openNewBoardModal(){ document.getElementById('newBoardModal').style.display = 'flex'; }
+function openNewBoardModal(){
+  document.getElementById('newBoardModal').style.display = 'flex';
+  populateBoardTemplateSelect();
+}
 function closeNewBoardModal(){
   document.getElementById('newBoardModal').style.display = 'none';
   document.getElementById('newBoardName').value = '';
@@ -979,9 +998,10 @@ function closeNewBoardModal(){
 async function submitNewBoard(){
   const name = document.getElementById('newBoardName').value.trim();
   if (!name) return;
+  const template = document.getElementById('newBoardTemplate').value;
   const r = await fetch('/api/boards', {
     method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({name})
+    body: JSON.stringify({name, template})
   });
   const board = await r.json();
   window.location.href = '/board/' + board.id;
@@ -1214,6 +1234,39 @@ async function postUpdate(itemId){
   await fetch(`/api/items/${itemId}/updates`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({body})
   });
+}
+
+// ── CSV export / import ───────────────────────────────────────────────────
+
+function exportBoardCSV(){
+  window.location.href = `/api/boards/${BOARD_ID}/export.csv`;
+}
+let IMPORT_CSV_TEXT = '';
+function openImportCSVModal(){ document.getElementById('importCsvModal').style.display = 'flex'; }
+function closeImportCSVModal(){
+  document.getElementById('importCsvModal').style.display = 'none';
+  document.getElementById('importCsvFile') && (document.getElementById('importCsvFile').value = '');
+  document.getElementById('importCsvStatus').textContent = '';
+  IMPORT_CSV_TEXT = '';
+}
+function readImportFile(input){
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => { IMPORT_CSV_TEXT = reader.result; };
+  reader.readAsText(file);
+}
+async function submitImportCSV(){
+  const status = document.getElementById('importCsvStatus');
+  if (!IMPORT_CSV_TEXT) { status.textContent = 'Choose a CSV file first.'; return; }
+  status.textContent = 'Importing…';
+  const r = await fetch(`/api/boards/${BOARD_ID}/import_csv`, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({csv: IMPORT_CSV_TEXT})
+  });
+  const data = await r.json();
+  if (!r.ok) { status.textContent = data.error || 'Import failed.'; return; }
+  closeImportCSVModal();
+  window.location.reload();
 }
 
 // ── Automations ("when status changes to X, do Y") ───────────────────────

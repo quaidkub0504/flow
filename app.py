@@ -11,9 +11,11 @@ updates live for everyone looking at a board at once.
 """
 
 import os
+import csv
+import io
 from datetime import timedelta
 
-from flask import Flask, request, jsonify, render_template, session, redirect
+from flask import Flask, request, jsonify, render_template, session, redirect, Response
 from flask_socketio import SocketIO, join_room, emit
 from dotenv import load_dotenv
 
@@ -22,7 +24,7 @@ from sqlalchemy import inspect, text
 from models import (
     db, User, Board, Group, Column, Item, ColumnValue, Update, ActivityLog, Folder, View, Automation,
     COLUMN_TYPES, DEFAULT_STATUS_LABELS, DEFAULT_PRIORITY_LABELS, GROUP_COLOR_ROTATION, VIEW_TYPES,
-    AUTOMATION_ACTIONS,
+    AUTOMATION_ACTIONS, BOARD_TEMPLATES, JOB_TYPE_OPTIONS,
 )
 
 load_dotenv()
@@ -170,6 +172,41 @@ def board_page(board_id):
     return render_template("board.html", user=current_user().to_dict(), board=board.to_dict())
 
 
+@app.route("/my-work")
+def my_work_page():
+    return render_template("my_work.html", user=current_user().to_dict())
+
+
+@app.route("/api/my_work")
+def api_my_work():
+    """Everything assigned to the current user (via any Person column),
+    across every board — the daily-use "what do I need to do" view real
+    monday.com calls My Work."""
+    user = current_user()
+    out = []
+    for board in Board.query.filter_by(archived=False).all():
+        person_cols = [c for c in board.columns if c.type == "person"]
+        if not person_cols:
+            continue
+        status_col = next((c for c in board.columns if c.type == "status"), None)
+        date_col = next((c for c in board.columns if c.type == "date"), None)
+        for item in Item.query.filter_by(board_id=board.id).all():
+            values = {v.column_id: v.value for v in item.values}
+            assigned = any(user.id in (values.get(pc.id, {}).get("user_ids") or []) for pc in person_cols)
+            if not assigned:
+                continue
+            status = None
+            if status_col:
+                label_id = values.get(status_col.id, {}).get("label_id")
+                status = next((l for l in status_col.settings.get("labels", []) if l["id"] == label_id), None)
+            out.append({
+                "item_id": item.id, "item_name": item.name, "board_id": board.id, "board_name": board.name,
+                "status": status, "due_date": values.get(date_col.id, {}).get("date") if date_col else None,
+            })
+    out.sort(key=lambda x: (x["due_date"] is None, x["due_date"] or ""))
+    return jsonify(out)
+
+
 # ── Board / item / column APIs ──────────────────────────────────────────
 
 @app.route("/api/users")
@@ -192,22 +229,32 @@ def api_boards():
     db.session.add(board)
     db.session.flush()
 
-    # Every new board starts with one group and a sensible default column
-    # set (Status/Person/Date) — matches what monday.com itself seeds a
-    # brand-new board with, so it's immediately usable.
-    group = Group(board_id=board.id, name="Group Title", color=GROUP_COLOR_ROTATION[0], position=0)
+    # Every new board starts pre-shaped for a job, not an empty grid —
+    # matches what monday.com itself does with its own template gallery.
+    tmpl_key = data.get("template") if data.get("template") in BOARD_TEMPLATES else "blank"
+    tmpl = BOARD_TEMPLATES[tmpl_key]
+    group = Group(board_id=board.id, name=tmpl["group"], color=GROUP_COLOR_ROTATION[0], position=0)
     db.session.add(group)
 
-    status_col = Column(board_id=board.id, name="Status", type="status", position=0)
-    status_col.settings = {"labels": DEFAULT_STATUS_LABELS}
-    person_col = Column(board_id=board.id, name="Person", type="person", position=1)
-    date_col = Column(board_id=board.id, name="Date", type="date", position=2)
-    db.session.add_all([status_col, person_col, date_col])
+    for idx, (col_name, col_type) in enumerate(tmpl["columns"]):
+        column = Column(board_id=board.id, name=col_name, type=col_type, position=idx)
+        if col_type == "status":
+            column.settings = {"labels": DEFAULT_STATUS_LABELS}
+        elif col_type == "priority":
+            column.settings = {"labels": DEFAULT_PRIORITY_LABELS}
+        elif col_type == "dropdown":
+            column.settings = {"options": JOB_TYPE_OPTIONS if tmpl_key == "service_call" else []}
+        db.session.add(column)
     db.session.add(View(board_id=board.id, name="Main table", type="table", position=0))
 
     db.session.add(ActivityLog(board_id=board.id, user_id=user.id, action="created_board", detail=name))
     db.session.commit()
     return jsonify(board.to_dict())
+
+
+@app.route("/api/board_templates")
+def api_board_templates():
+    return jsonify([{"key": k, "label": v["label"]} for k, v in BOARD_TEMPLATES.items()])
 
 
 @app.route("/api/boards/<int:board_id>", methods=["GET", "PATCH", "DELETE"])
@@ -286,6 +333,149 @@ def api_duplicate_board(board_id):
                                 detail=f"Duplicated from {src.name}"))
     db.session.commit()
     return jsonify(dup.to_dict())
+
+
+# ── CSV export / import ──────────────────────────────────────────────────
+
+def _cell_text(column, value, user_names):
+    t = column.type
+    if t in ("status", "priority"):
+        labels = {l["id"]: l["text"] for l in column.settings.get("labels", [])}
+        return labels.get(value.get("label_id"), "")
+    if t == "person":
+        return ", ".join(user_names.get(uid, "") for uid in value.get("user_ids", []))
+    if t == "dropdown":
+        opts = {o["id"]: o["text"] for o in column.settings.get("options", [])}
+        return ", ".join(opts.get(oid, "") for oid in value.get("option_ids", []))
+    if t == "date":
+        return value.get("date") or ""
+    if t == "timeline":
+        return f"{value.get('start','')} - {value.get('end','')}" if value.get("start") else ""
+    if t == "number":
+        return "" if value.get("number") is None else str(value["number"])
+    if t == "progress":
+        return "" if value.get("number") is None else f"{value['number']}%"
+    if t == "rating":
+        return "" if not value.get("stars") else str(value["stars"])
+    if t == "checkbox":
+        return "Yes" if value.get("checked") else "No"
+    if t == "files":
+        return "; ".join(f.get("url", "") for f in value.get("files", []))
+    if t == "link":
+        return value.get("url") or ""
+    return value.get("text") or ""
+
+
+@app.route("/api/boards/<int:board_id>/export.csv")
+def api_export_csv(board_id):
+    board = Board.query.get_or_404(board_id)
+    columns = board.columns
+    items = Item.query.filter_by(board_id=board_id).order_by(Item.position).all()
+    user_names = {u.id: u.name for u in User.query.all()}
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Item"] + [c.name for c in columns])
+    for item in items:
+        values = {v.column_id: v.value for v in item.values}
+        writer.writerow([item.name] + [_cell_text(c, values.get(c.id, {}), user_names) for c in columns])
+
+    safe_name = "".join(ch if ch.isalnum() or ch in " _-" else "_" for ch in board.name).strip() or "board"
+    return Response(buf.getvalue(), mimetype="text/csv",
+                     headers={"Content-Disposition": f'attachment; filename="{safe_name}.csv"'})
+
+
+def _coerce_csv_value(column, raw):
+    t = column.type
+    if t in ("status", "priority"):
+        match = next((l for l in column.settings.get("labels", []) if l["text"].strip().lower() == raw.lower()), None)
+        return {"label_id": match["id"]} if match else None
+    if t == "dropdown":
+        match = next((o for o in column.settings.get("options", []) if o["text"].strip().lower() == raw.lower()), None)
+        return {"option_ids": [match["id"]]} if match else None
+    if t == "checkbox":
+        return {"checked": raw.strip().lower() in ("yes", "true", "1", "y")}
+    if t in ("number", "progress"):
+        try:
+            return {"number": float(raw)}
+        except ValueError:
+            return None
+    if t == "rating":
+        try:
+            return {"stars": max(0, min(5, int(float(raw))))}
+        except ValueError:
+            return None
+    if t == "date":
+        return {"date": raw.strip()}
+    if t == "link":
+        return {"url": raw.strip()}
+    return {"text": raw}
+
+
+@app.route("/api/boards/<int:board_id>/import_csv", methods=["POST"])
+def api_import_csv(board_id):
+    board = Board.query.get_or_404(board_id)
+    user = current_user()
+    data = request.get_json(force=True)
+    rows = list(csv.reader(io.StringIO(data.get("csv") or "")))
+    if len(rows) < 2:
+        return jsonify({"error": "CSV needs a header row and at least one data row"}), 400
+    header, data_rows = rows[0], rows[1:]
+    if len(data_rows) > 2000:
+        return jsonify({"error": "That's more than 2000 rows — split it up and import in batches"}), 400
+
+    existing_by_name = {c.name.strip().lower(): c for c in board.columns}
+    new_cols = []
+    col_for_header = []
+    position = len(board.columns)
+    for h in header[1:]:
+        key = h.strip().lower()
+        col = existing_by_name.get(key)
+        if not col:
+            col = Column(board_id=board_id, name=h.strip() or "Column", type="text", position=position)
+            position += 1
+            db.session.add(col)
+            db.session.flush()
+            existing_by_name[key] = col
+            new_cols.append(col)
+        col_for_header.append(col)
+
+    group = board.groups[0] if board.groups else None
+    is_new_group = group is None
+    if is_new_group:
+        group = Group(board_id=board_id, name="Imported", color=GROUP_COLOR_ROTATION[0], position=0)
+        db.session.add(group)
+        db.session.flush()
+
+    start_pos = Item.query.filter_by(group_id=group.id).count()
+    created = 0
+    for row in data_rows:
+        if not row or not any(cell.strip() for cell in row):
+            continue
+        item = Item(board_id=board_id, group_id=group.id, name=(row[0].strip() or "Untitled"),
+                     position=start_pos + created, created_by=user.id)
+        db.session.add(item)
+        db.session.flush()
+        for i, col in enumerate(col_for_header):
+            raw = row[i + 1].strip() if i + 1 < len(row) else ""
+            if not raw:
+                continue
+            value = _coerce_csv_value(col, raw)
+            if value is not None:
+                cv = ColumnValue(item_id=item.id, column_id=col.id)
+                cv.value = value
+                db.session.add(cv)
+        created += 1
+
+    db.session.add(ActivityLog(board_id=board_id, user_id=user.id, action="created_item",
+                                detail=f"Imported {created} items from CSV"))
+    db.session.commit()
+
+    for c in new_cols:
+        socketio.emit("column_created", c.to_dict(), room=f"board_{board_id}")
+    if is_new_group:
+        socketio.emit("group_created", group.to_dict(), room=f"board_{board_id}")
+    return jsonify({"success": True, "created": created})
 
 
 # ── Folders (sidebar grouping for boards) ────────────────────────────────

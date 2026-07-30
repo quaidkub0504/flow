@@ -13,6 +13,71 @@ function timeAgo(iso){
 }
 function esc_(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
+// ── Confirm modal (every page that needs a blocking "are you sure?") ────
+// Requires a #confirmModal backdrop with #confirmModalHdr/#confirmModalBody/
+// #confirmModalOkBtn in the page markup.
+function confirmAction(title, body, okLabel, onConfirm){
+  document.getElementById('confirmModalHdr').textContent = title;
+  document.getElementById('confirmModalBody').textContent = body;
+  const okBtn = document.getElementById('confirmModalOkBtn');
+  okBtn.textContent = okLabel || 'Delete';
+  okBtn.onclick = () => { closeConfirmModal(); onConfirm(); };
+  document.getElementById('confirmModal').style.display = 'flex';
+}
+function closeConfirmModal(){ document.getElementById('confirmModal').style.display = 'none'; }
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (typeof closePicker === 'function') closePicker();
+  if (typeof closeAllMenus === 'function') closeAllMenus();
+  if (typeof closeMenus === 'function') closeMenus();
+  if (typeof closeUpdates === 'function') closeUpdates();
+  document.querySelectorAll('.modal-backdrop').forEach(m => { m.style.display = 'none'; });
+});
+
+// ── Undo toast — for reversible, frequent actions (item/column/group
+// delete) where a grace period beats a blocking confirm dialog. Nothing
+// is actually sent to the server until the toast times out unanswered. ──
+let _pendingUndos = {};
+function showUndoToast(message, onUndo, onCommit){
+  let container = document.getElementById('toastContainer');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toastContainer';
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+  const id = 'toast_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+  const toast = document.createElement('div');
+  toast.className = 'undo-toast';
+  toast.id = id;
+  toast.innerHTML = `<span>${esc_(message)}</span><button onclick="undoToast('${id}')">Undo</button>`;
+  container.appendChild(toast);
+  const timeoutId = setTimeout(() => {
+    delete _pendingUndos[id];
+    toast.remove();
+    onCommit();
+  }, 6000);
+  _pendingUndos[id] = {timeoutId, onUndo};
+}
+function undoToast(id){
+  const pending = _pendingUndos[id];
+  if (!pending) return;
+  clearTimeout(pending.timeoutId);
+  delete _pendingUndos[id];
+  const el = document.getElementById(id);
+  if (el) el.remove();
+  pending.onUndo();
+}
+
+// ── Shared "New Board" template select (used by home.html and board.html) ─
+async function populateBoardTemplateSelect(){
+  const sel = document.getElementById('newBoardTemplate');
+  if (!sel || sel.options.length) return;  // already populated
+  const templates = await fetch('/api/board_templates').then(r => r.json());
+  sel.innerHTML = templates.map(t => `<option value="${t.key}">${esc_(t.label)}</option>`).join('');
+}
+
 // ── Global search ─────────────────────────────────────────────────────────
 let _searchDebounce = null;
 function onGlobalSearchInput(q){
