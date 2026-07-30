@@ -7,6 +7,10 @@ let FILTER_STATE = {};          // { columnId: Set(labelId/optionId) }
 let SORT_STATE = { columnId: null, dir: 'asc' };
 let HIDDEN_COLS = new Set();
 let RENAME_COLUMN_ID = null;
+let SELECTED_ITEMS = new Set();
+let DRAG_ITEM_ID = null;
+let DRAG_GROUP_ID = null;
+const GROUP_COLORS = ["#579bfc","#00c875","#fdab3d","#e2445c","#a25ddc","#66ccff","#ff642e","#037f4c"];
 
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -37,6 +41,7 @@ async function init(){
   render();
   connectSocket();
   wireBoardTitleEdit();
+  wireBoardDescEdit();
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.picker') && !e.target.closest('.cell')) closePicker();
     if (!e.target.closest('.app-menu') && !e.target.closest('.th-menu-btn') && !e.target.closest('.row-menu-btn')
@@ -44,6 +49,13 @@ async function init(){
         && !e.target.closest('.icon-btn-sm') && !e.target.closest('.star-toggle')) {
       closeAllMenus();
     }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    closePicker();
+    closeAllMenus();
+    closeUpdates();
+    document.querySelectorAll('.modal-backdrop').forEach(m => { m.style.display = 'none'; });
   });
 }
 
@@ -83,6 +95,33 @@ function connectSocket(){
   });
   socket.on('group_created', (group) => {
     if (!STATE.groups.find(g => g.id === group.id)) STATE.groups.push(group);
+    render();
+  });
+  socket.on('group_updated', (group) => {
+    const idx = STATE.groups.findIndex(g => g.id === group.id);
+    if (idx >= 0) STATE.groups[idx] = group;
+    render();
+  });
+  socket.on('group_deleted', ({id}) => {
+    STATE.groups = STATE.groups.filter(g => g.id !== id);
+    render();
+  });
+  socket.on('groups_reordered', (groups) => {
+    STATE.groups = groups;
+    render();
+  });
+  socket.on('items_reordered', (items) => {
+    items.forEach(updated => {
+      const idx = STATE.items.findIndex(i => i.id === updated.id);
+      if (idx >= 0) STATE.items[idx] = updated;
+    });
+    render();
+  });
+  socket.on('items_bulk_deleted', ({ids}) => {
+    const idSet = new Set(ids);
+    STATE.items = STATE.items.filter(i => !idSet.has(i.id));
+    ids.forEach(id => SELECTED_ITEMS.delete(id));
+    renderBulkBar();
     render();
   });
   socket.on('view_created', (view) => {
@@ -201,11 +240,18 @@ function renderTableView(){
 function renderGroup(group){
   const items = itemsForGroup(group.id);
   return `
-    <div class="group-block" data-group-id="${group.id}">
+    <div class="group-block" data-group-id="${group.id}"
+         ondragover="onGroupDragOver(event)" ondrop="onGroupDrop(event, ${group.id})">
       <div class="group-hdr" onclick="toggleGroup(${group.id})">
+        <span class="drag-handle" draggable="true" onclick="event.stopPropagation();"
+              ondragstart="onGroupDragStart(event, ${group.id})">⠿</span>
         <span class="group-collapse-arrow ${group.collapsed ? 'collapsed' : ''}">▼</span>
-        <span class="group-name" style="color:${group.color};">${esc(group.name)}</span>
+        <span class="group-name" contenteditable="true" style="color:${group.color};"
+              onclick="event.stopPropagation();"
+              onblur="saveGroupName(${group.id}, this)"
+              onkeydown="if(event.key==='Enter'){event.preventDefault(); this.blur();}">${esc(group.name)}</span>
         <span class="group-count">${items.length} item${items.length===1?'':'s'}</span>
+        <span class="th-menu-btn" onclick="event.stopPropagation(); openGroupMenu(event, ${group.id})">⋮</span>
       </div>
       ${group.collapsed ? '' : renderTable(group, items)}
     </div>`;
@@ -213,9 +259,12 @@ function renderGroup(group){
 
 function renderTable(group, items){
   const cols = visibleColumns();
+  const allSelected = items.length > 0 && items.every(i => SELECTED_ITEMS.has(i.id));
   return `
     <table class="board-table">
       <thead><tr>
+        <th class="select-cell"><input type="checkbox" ${allSelected?'checked':''} onclick="toggleSelectAllInGroup(${group.id})"/></th>
+        <th style="width:22px;"></th>
         <th style="min-width:240px;">Item</th>
         ${cols.map(c => `
           <th style="width:${c.width}px;">
@@ -229,7 +278,7 @@ function renderTable(group, items){
       <tbody>
         ${items.map(item => renderRow(group, item)).join('')}
         <tr class="add-item-row">
-          <td colspan="${cols.length + 2}" style="border-left:4px solid ${group.color};">
+          <td colspan="${cols.length + 4}" style="border-left:4px solid ${group.color};">
             <input class="add-item-input" placeholder="+ Add item"
                    onkeydown="if(event.key==='Enter'){addItem(${group.id}, this);}"/>
           </td>
@@ -245,7 +294,7 @@ function renderFooterRow(items, cols){
     : null);
   if (!sums.some(s => s !== null)) return '';
   return `<tr class="footer-row">
-    <td class="footer-label">Sum</td>
+    <td class="footer-label" colspan="3">Sum</td>
     ${cols.map((c,idx) => `<td>${sums[idx] !== null ? `<span class="footer-sum">${sums[idx]}</span>` : ''}</td>`).join('')}
     <td></td>
   </tr>`;
@@ -253,8 +302,14 @@ function renderFooterRow(items, cols){
 
 function renderRow(group, item){
   const cols = visibleColumns();
+  const draggable = !SORT_STATE.columnId;
+  const selected = SELECTED_ITEMS.has(item.id);
   return `
-    <tr data-item-id="${item.id}">
+    <tr data-item-id="${item.id}" class="${selected?'row-selected':''}"
+        ondragover="onRowDragOver(event)" ondragleave="onRowDragLeave(event)"
+        ondrop="onRowDrop(event, ${group.id}, ${item.id})">
+      <td class="select-cell"><input type="checkbox" ${selected?'checked':''} onclick="toggleSelectItem(${item.id})"/></td>
+      <td class="drag-handle-cell">${draggable ? `<span class="drag-handle" draggable="true" ondragstart="onRowDragStart(event, ${item.id})" ondragend="onRowDragEnd(event)">⠿</span>` : ''}</td>
       <td class="item-name-cell" style="--gcolor:${group.color};" contenteditable="true"
           onblur="saveItemName(${item.id}, this)"
           onkeydown="if(event.key==='Enter'){event.preventDefault(); this.blur();}"
@@ -395,6 +450,191 @@ async function addKanbanCard(statusColId, labelId){
   render();
 }
 
+// ── Drag-and-drop reordering (items + groups) ────────────────────────────
+// Disabled for items while a Sort is active, since the on-screen order
+// wouldn't match stored position — same rule real monday.com applies.
+
+function onRowDragStart(evt, itemId){
+  evt.stopPropagation();
+  DRAG_ITEM_ID = itemId;
+  evt.dataTransfer.effectAllowed = 'move';
+}
+function onRowDragEnd(){ DRAG_ITEM_ID = null; }
+function onRowDragOver(evt){
+  if (DRAG_ITEM_ID == null) return;
+  evt.preventDefault();
+  evt.currentTarget.classList.add('drag-over-row');
+}
+function onRowDragLeave(evt){ evt.currentTarget.classList.remove('drag-over-row'); }
+async function onRowDrop(evt, targetGroupId, targetItemId){
+  evt.preventDefault();
+  evt.currentTarget.classList.remove('drag-over-row');
+  if (DRAG_ITEM_ID == null || DRAG_ITEM_ID === targetItemId) return;
+  await moveItemRelativeTo(DRAG_ITEM_ID, targetGroupId, targetItemId);
+  DRAG_ITEM_ID = null;
+}
+async function moveItemRelativeTo(draggedId, targetGroupId, beforeItemId){
+  const dragged = STATE.items.find(i => i.id === draggedId);
+  if (!dragged) return;
+  const sourceGroupId = dragged.group_id;
+
+  let destItems = STATE.items.filter(i => i.group_id === targetGroupId && i.id !== draggedId)
+    .sort((a,b) => a.position - b.position);
+  const insertAt = beforeItemId != null ? destItems.findIndex(i => i.id === beforeItemId) : destItems.length;
+  destItems.splice(insertAt < 0 ? destItems.length : insertAt, 0, dragged);
+
+  const updates = destItems.map((it, idx) => ({id: it.id, group_id: targetGroupId, position: idx}));
+  if (sourceGroupId !== targetGroupId) {
+    const sourceItems = STATE.items.filter(i => i.group_id === sourceGroupId && i.id !== draggedId)
+      .sort((a,b) => a.position - b.position);
+    sourceItems.forEach((it, idx) => updates.push({id: it.id, group_id: sourceGroupId, position: idx}));
+  }
+
+  updates.forEach(u => {
+    const it = STATE.items.find(i => i.id === u.id);
+    if (it) { it.group_id = u.group_id; it.position = u.position; }
+  });
+  render();
+
+  await fetch('/api/items/reorder', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({items: updates})
+  });
+}
+
+function onGroupDragStart(evt, groupId){
+  evt.stopPropagation();
+  DRAG_GROUP_ID = groupId;
+}
+function onGroupDragOver(evt){
+  if (DRAG_GROUP_ID == null) return;
+  evt.preventDefault();
+}
+async function onGroupDrop(evt, targetGroupId){
+  evt.preventDefault();
+  if (DRAG_GROUP_ID == null || DRAG_GROUP_ID === targetGroupId) return;
+  const ordered = STATE.groups.slice().sort((a,b) => a.position - b.position).map(g => g.id);
+  const fromIdx = ordered.indexOf(DRAG_GROUP_ID);
+  ordered.splice(fromIdx, 1);
+  const toIdx = ordered.indexOf(targetGroupId);
+  ordered.splice(toIdx, 0, DRAG_GROUP_ID);
+  DRAG_GROUP_ID = null;
+  ordered.forEach((gid, idx) => { const g = STATE.groups.find(x => x.id === gid); if (g) g.position = idx; });
+  render();
+  await fetch(`/api/boards/${BOARD_ID}/reorder_groups`, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({group_ids: ordered})
+  });
+}
+
+// ── Bulk selection + actions ──────────────────────────────────────────────
+
+function toggleSelectItem(itemId){
+  if (SELECTED_ITEMS.has(itemId)) SELECTED_ITEMS.delete(itemId); else SELECTED_ITEMS.add(itemId);
+  renderBulkBar();
+  render();
+}
+function toggleSelectAllInGroup(groupId){
+  const ids = itemsForGroup(groupId).map(i => i.id);
+  const allSelected = ids.length > 0 && ids.every(id => SELECTED_ITEMS.has(id));
+  ids.forEach(id => allSelected ? SELECTED_ITEMS.delete(id) : SELECTED_ITEMS.add(id));
+  renderBulkBar();
+  render();
+}
+function clearSelection(){ SELECTED_ITEMS.clear(); renderBulkBar(); render(); }
+function renderBulkBar(){
+  const bar = document.getElementById('bulkActionBar');
+  if (!bar) return;
+  if (!SELECTED_ITEMS.size) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  bar.innerHTML = `
+    <b>${SELECTED_ITEMS.size} selected</b>
+    <button class="tb-btn" onclick="bulkDuplicate()">⎘ Duplicate</button>
+    <button class="tb-btn" onclick="bulkSetStatus(event)">🏷 Set Status</button>
+    <button class="tb-btn" style="color:#ff6b81;" onclick="bulkDelete()">🗑 Delete</button>
+    <button class="tb-btn" onclick="clearSelection()">✕ Clear</button>`;
+}
+function bulkDelete(){
+  const ids = Array.from(SELECTED_ITEMS);
+  confirmAction('Delete items', `Delete ${ids.length} item(s)? This can't be undone.`, 'Delete', async () => {
+    await fetch('/api/items/bulk_delete', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ids})
+    });
+    SELECTED_ITEMS.clear();
+    renderBulkBar();
+  });
+}
+async function bulkDuplicate(){
+  const ids = Array.from(SELECTED_ITEMS);
+  await fetch('/api/items/bulk_duplicate', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ids})
+  });
+  SELECTED_ITEMS.clear();
+  renderBulkBar();
+}
+function bulkSetStatus(evt){
+  const statusCol = STATE.columns.find(c => c.type === 'status');
+  if (!statusCol) return;
+  const labels = statusCol.settings.labels || [];
+  openMenuAt(evt, labels.map(l => `
+    <div class="menu-item" onclick="applyBulkStatus(${statusCol.id},'${l.id}')">
+      <span class="picker-swatch" style="background:${l.color};"></span>${esc(l.text)}
+    </div>`).join(''));
+}
+async function applyBulkStatus(columnId, labelId){
+  closeAllMenus();
+  const ids = Array.from(SELECTED_ITEMS);
+  await fetch('/api/items/bulk_set_value', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ids, column_id: columnId, value: {label_id: labelId}})
+  });
+  SELECTED_ITEMS.clear();
+  renderBulkBar();
+}
+
+// ── Group management (rename / color / duplicate / delete) ──────────────
+
+async function saveGroupName(groupId, el){
+  const name = el.textContent.trim() || 'New Group';
+  el.textContent = name;
+  await fetch(`/api/groups/${groupId}`, {
+    method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name})
+  });
+}
+function focusGroupNameEdit(groupId){
+  const el = document.querySelector(`.group-block[data-group-id="${groupId}"] .group-name`);
+  if (el) el.focus();
+}
+function openGroupMenu(evt, groupId){
+  const swatches = GROUP_COLORS.map(c => `
+    <span class="picker-swatch" style="background:${c};cursor:pointer;display:inline-block;margin:3px;width:18px;height:18px;"
+          onclick="setGroupColor(${groupId}, '${c}')"></span>`).join('');
+  openMenuAt(evt, `
+    <div class="menu-item" onclick="closeAllMenus(); focusGroupNameEdit(${groupId})">✎ Rename</div>
+    <div class="menu-item" onclick="duplicateGroup(${groupId})">⎘ Duplicate</div>
+    <div class="menu-sep"></div>
+    <div class="filter-col-name" style="padding:4px 10px;">Color</div>
+    <div style="padding:0 6px 6px;">${swatches}</div>
+    <div class="menu-sep"></div>
+    <div class="menu-item danger" onclick="confirmDeleteGroup(${groupId})">🗑 Delete</div>
+  `);
+}
+async function setGroupColor(groupId, color){
+  closeAllMenus();
+  await fetch(`/api/groups/${groupId}`, {
+    method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({color})
+  });
+}
+async function duplicateGroup(groupId){
+  closeAllMenus();
+  await fetch(`/api/groups/${groupId}/duplicate`, {method: 'POST'});
+}
+function confirmDeleteGroup(groupId){
+  closeAllMenus();
+  const group = STATE.groups.find(g => g.id === groupId);
+  confirmAction('Delete group', `Delete "${group.name}" and all its items? This can't be undone.`, 'Delete', async () => {
+    await fetch(`/api/groups/${groupId}`, {method: 'DELETE'});
+  });
+}
+
 // ── Mutations ────────────────────────────────────────────────────────────
 
 async function saveValue(itemId, columnId, value){
@@ -447,6 +687,16 @@ function wireBoardTitleEdit(){
     el.textContent = name;
     await fetch(`/api/boards/${BOARD_ID}`, {
       method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name})
+    });
+  });
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); } });
+}
+
+function wireBoardDescEdit(){
+  const el = document.getElementById('boardDesc');
+  el.addEventListener('blur', async () => {
+    await fetch(`/api/boards/${BOARD_ID}`, {
+      method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({description: el.textContent.trim()})
     });
   });
   el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); } });
@@ -546,6 +796,8 @@ async function openBoardSettingsMenu(evt){
   const folders = await fetch('/api/folders').then(r => r.json());
   const folderItems = folders.map(f => `<div class="menu-item" onclick="moveBoardToFolder(${f.id})">📁 ${esc(f.name)}</div>`).join('');
   openMenuAt(evt, `
+    <div class="menu-item" onclick="closeAllMenus(); openAutomationsModal();">⚡ Automations</div>
+    <div class="menu-sep"></div>
     <div class="menu-item" onclick="duplicateBoardFromPage()">⎘ Duplicate board</div>
     <div class="menu-sep"></div>
     <div class="filter-col-name" style="padding:6px 10px 2px;">Move to folder</div>
@@ -962,6 +1214,82 @@ async function postUpdate(itemId){
   await fetch(`/api/items/${itemId}/updates`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({body})
   });
+}
+
+// ── Automations ("when status changes to X, do Y") ───────────────────────
+
+async function openAutomationsModal(){
+  document.getElementById('automationsModal').style.display = 'flex';
+  populateAutomationForm();
+  await refreshAutomationsList();
+}
+function closeAutomationsModal(){ document.getElementById('automationsModal').style.display = 'none'; }
+
+function populateAutomationForm(){
+  const triggerCols = STATE.columns.filter(c => c.type === 'status' || c.type === 'priority');
+  const form = document.getElementById('automationsForm');
+  const noCols = document.getElementById('automationsNoCols');
+  if (!triggerCols.length) { form.style.display = 'none'; noCols.style.display = 'block'; return; }
+  form.style.display = 'block'; noCols.style.display = 'none';
+
+  const colSel = document.getElementById('autoColumn');
+  colSel.innerHTML = triggerCols.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  colSel.onchange = updateAutoLabelOptions;
+  updateAutoLabelOptions();
+
+  document.getElementById('autoTargetGroup').innerHTML =
+    STATE.groups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
+  document.getElementById('autoTargetUser').innerHTML =
+    ALL_USERS.map(u => `<option value="${u.id}">${esc(u.name)}</option>`).join('');
+  onAutoActionChange();
+}
+function updateAutoLabelOptions(){
+  const colId = Number(document.getElementById('autoColumn').value);
+  const col = STATE.columns.find(c => c.id === colId);
+  const labels = (col && col.settings.labels) || [];
+  document.getElementById('autoLabel').innerHTML = labels.map(l => `<option value="${l.id}">${esc(l.text)}</option>`).join('');
+}
+function onAutoActionChange(){
+  const action = document.getElementById('autoAction').value;
+  document.getElementById('autoTargetGroup').style.display = action === 'move_to_group' ? 'block' : 'none';
+  document.getElementById('autoTargetUser').style.display = action === 'notify_person' ? 'block' : 'none';
+}
+async function refreshAutomationsList(){
+  const rules = await fetch(`/api/boards/${BOARD_ID}/automations`).then(r => r.json());
+  const list = document.getElementById('automationsList');
+  list.innerHTML = rules.length ? rules.map(r => {
+    const col = STATE.columns.find(c => c.id === r.column_id);
+    const label = col ? (col.settings.labels || []).find(l => l.id === r.trigger_label_id) : null;
+    let actionText;
+    if (r.action_type === 'move_to_group') {
+      const g = STATE.groups.find(x => x.id === r.target_group_id);
+      actionText = `move to "${g ? esc(g.name) : '?'}"`;
+    } else {
+      const u = ALL_USERS.find(x => x.id === r.target_user_id);
+      actionText = `notify ${u ? esc(u.name) : '?'}`;
+    }
+    return `<div class="sort-row">
+      <span>When <b>${col ? esc(col.name) : '?'}</b> → "${label ? esc(label.text) : '?'}", ${actionText}</span>
+      <span class="file-chip-x" onclick="deleteAutomation(${r.id})">✕</span>
+    </div>`;
+  }).join('') : `<div style="color:var(--text-faint);font-size:12px;">No automations yet.</div>`;
+}
+async function submitAutomation(){
+  const column_id = Number(document.getElementById('autoColumn').value);
+  const trigger_label_id = document.getElementById('autoLabel').value;
+  const action_type = document.getElementById('autoAction').value;
+  if (!trigger_label_id) return;
+  const body = {column_id, trigger_label_id, action_type};
+  if (action_type === 'move_to_group') body.target_group_id = Number(document.getElementById('autoTargetGroup').value);
+  else body.target_user_id = Number(document.getElementById('autoTargetUser').value);
+  await fetch(`/api/boards/${BOARD_ID}/automations`, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  await refreshAutomationsList();
+}
+async function deleteAutomation(id){
+  await fetch(`/api/automations/${id}`, {method: 'DELETE'});
+  await refreshAutomationsList();
 }
 
 init();

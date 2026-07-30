@@ -70,7 +70,9 @@ html,body{height:100%;background:var(--bg-app);color:var(--text);}
 .board-title-row{display:flex;align-items:center;gap:10px;}
 .board-icon{font-size:22px;}
 .board-title{font-size:20px;font-weight:800;color:var(--text);}
-.board-desc{font-size:12px;color:var(--text-dim);margin-top:2px;}
+.board-desc{font-size:12px;color:var(--text-dim);margin-top:2px;outline:none;border-radius:4px;}
+.board-desc:hover{background:var(--bg-row);}
+.board-desc:empty:before{content:attr(data-placeholder);color:var(--text-faint);}
 
 .board-tabs{display:flex;gap:22px;padding:0 28px;background:var(--bg-app);border-bottom:1px solid var(--border);}
 .board-tab{display:inline-block;padding:10px 2px;font-size:13px;font-weight:600;color:var(--text-dim);
@@ -93,8 +95,25 @@ html,body{height:100%;background:var(--bg-app);color:var(--text);}
 .group-hdr{display:flex;align-items:center;gap:8px;padding:8px 4px;cursor:pointer;user-select:none;}
 .group-collapse-arrow{font-size:10px;color:var(--text-dim);transition:transform .1s;width:12px;}
 .group-collapse-arrow.collapsed{transform:rotate(-90deg);}
-.group-name{font-size:15px;font-weight:800;}
+.group-name{font-size:15px;font-weight:800;outline:none;border-radius:4px;padding:0 2px;}
+.group-name:focus{background:var(--bg-row);}
 .group-count{font-size:12px;color:var(--text-faint);font-weight:500;}
+.group-hdr .th-menu-btn{opacity:0;margin-left:2px;}
+.group-hdr:hover .th-menu-btn{opacity:1;}
+.group-hdr.drag-over{outline:2px dashed var(--accent-blue);outline-offset:2px;}
+
+.drag-handle{cursor:grab;color:var(--text-faint);font-size:14px;user-select:none;}
+.drag-handle:active{cursor:grabbing;}
+td.drag-handle-cell{width:22px;text-align:center;opacity:0;}
+tr:hover td.drag-handle-cell{opacity:1;}
+td.select-cell{width:30px;text-align:center;}
+td.select-cell input,th.select-cell input{accent-color:var(--accent-blue);cursor:pointer;}
+tr.row-selected td{background:rgba(0,115,234,0.10);}
+tr.drag-over-row{box-shadow:inset 0 2px 0 var(--accent-blue);}
+
+.bulk-action-bar{display:flex;align-items:center;gap:10px;padding:10px 28px;background:rgba(0,115,234,0.12);
+  border-bottom:1px solid var(--border);font-size:13px;color:var(--text);}
+.bulk-action-bar b{color:var(--text);}
 
 table.board-table{border-collapse:collapse;}
 table.board-table th{position:sticky;top:0;background:var(--bg-header);text-align:left;font-size:11px;

@@ -130,6 +130,7 @@ class Board(db.Model):
     columns = db.relationship("Column", backref="board", order_by="Column.position", cascade="all, delete-orphan")
     items = db.relationship("Item", backref="board", cascade="all, delete-orphan")
     views = db.relationship("View", backref="board", order_by="View.position", cascade="all, delete-orphan")
+    automations = db.relationship("Automation", backref="board", cascade="all, delete-orphan")
 
     def to_dict(self):
         return {
@@ -287,3 +288,29 @@ class ActivityLog(db.Model):
         return {"id": self.id, "board_id": self.board_id, "item_id": self.item_id, "user_id": self.user_id,
                 "action": self.action, "detail": self.detail,
                 "created_at": self.created_at.isoformat() if self.created_at else None}
+
+
+AUTOMATION_ACTIONS = {
+    "move_to_group": {"label": "Move item to group"},
+    "notify_person": {"label": "Notify a person"},
+}
+
+
+class Automation(db.Model):
+    """A simple "when status changes to X, do Y" recipe — matches monday's
+    Automate feature (deliberately scoped to one trigger shape: a status/
+    priority-type column landing on a specific label)."""
+    __tablename__ = "automations"
+    id = db.Column(db.Integer, primary_key=True)
+    board_id = db.Column(db.Integer, db.ForeignKey("boards.id"), nullable=False)
+    column_id = db.Column(db.Integer, db.ForeignKey("columns.id"), nullable=False)
+    trigger_label_id = db.Column(db.String(20), nullable=False)
+    action_type = db.Column(db.String(30), nullable=False)  # see AUTOMATION_ACTIONS
+    target_group_id = db.Column(db.Integer, db.ForeignKey("groups.id"), nullable=True)
+    target_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=_now)
+
+    def to_dict(self):
+        return {"id": self.id, "board_id": self.board_id, "column_id": self.column_id,
+                "trigger_label_id": self.trigger_label_id, "action_type": self.action_type,
+                "target_group_id": self.target_group_id, "target_user_id": self.target_user_id}

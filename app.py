@@ -20,8 +20,9 @@ from dotenv import load_dotenv
 from sqlalchemy import inspect, text
 
 from models import (
-    db, User, Board, Group, Column, Item, ColumnValue, Update, ActivityLog, Folder, View,
+    db, User, Board, Group, Column, Item, ColumnValue, Update, ActivityLog, Folder, View, Automation,
     COLUMN_TYPES, DEFAULT_STATUS_LABELS, DEFAULT_PRIORITY_LABELS, GROUP_COLOR_ROTATION, VIEW_TYPES,
+    AUTOMATION_ACTIONS,
 )
 
 load_dotenv()
@@ -370,6 +371,65 @@ def api_create_group(board_id):
     return jsonify(payload)
 
 
+@app.route("/api/groups/<int:group_id>", methods=["PATCH", "DELETE"])
+def api_group_detail(group_id):
+    group = Group.query.get_or_404(group_id)
+    board_id = group.board_id
+    if request.method == "DELETE":
+        db.session.delete(group)  # cascades to items -> values/updates
+        db.session.commit()
+        socketio.emit("group_deleted", {"id": group_id}, room=f"board_{board_id}")
+        return jsonify({"success": True})
+    data = request.get_json(force=True)
+    if "name" in data and data["name"].strip():
+        group.name = data["name"].strip()
+    if "color" in data:
+        group.color = data["color"]
+    if "collapsed" in data:
+        group.collapsed = bool(data["collapsed"])
+    db.session.commit()
+    payload = group.to_dict()
+    socketio.emit("group_updated", payload, room=f"board_{board_id}")
+    return jsonify(payload)
+
+
+@app.route("/api/groups/<int:group_id>/duplicate", methods=["POST"])
+def api_duplicate_group(group_id):
+    group = Group.query.get_or_404(group_id)
+    board_id = group.board_id
+    user = current_user()
+    position = len(Group.query.filter_by(board_id=board_id).all())
+    new_grp = Group(board_id=board_id, name=f"{group.name} (copy)", color=group.color, position=position)
+    db.session.add(new_grp)
+    db.session.flush()
+    new_items = []
+    for it in group.items:
+        new_item = Item(board_id=board_id, group_id=new_grp.id, name=it.name, position=it.position,
+                         created_by=user.id)
+        db.session.add(new_item)
+        db.session.flush()
+        for cv in it.values:
+            db.session.add(ColumnValue(item_id=new_item.id, column_id=cv.column_id, value_json=cv.value_json))
+        new_items.append(new_item)
+    db.session.commit()
+    payload = new_grp.to_dict()
+    socketio.emit("group_created", payload, room=f"board_{board_id}")
+    for it in new_items:
+        socketio.emit("item_created", it.to_dict(), room=f"board_{board_id}")
+    return jsonify(payload)
+
+
+@app.route("/api/boards/<int:board_id>/reorder_groups", methods=["POST"])
+def api_reorder_groups(board_id):
+    data = request.get_json(force=True)
+    for idx, gid in enumerate(data.get("group_ids", [])):
+        Group.query.filter_by(id=gid, board_id=board_id).update({"position": idx})
+    db.session.commit()
+    groups = [g.to_dict() for g in Group.query.filter_by(board_id=board_id).order_by(Group.position).all()]
+    socketio.emit("groups_reordered", groups, room=f"board_{board_id}")
+    return jsonify({"success": True})
+
+
 @app.route("/api/boards/<int:board_id>/columns", methods=["POST"])
 def api_create_column(board_id):
     board = Board.query.get_or_404(board_id)
@@ -512,6 +572,101 @@ def api_duplicate_item(item_id):
     return jsonify(payload)
 
 
+@app.route("/api/items/reorder", methods=["POST"])
+def api_reorder_items():
+    """Bulk position (and optionally group) update after a drag-and-drop
+    reorder — one broadcast for the whole drop instead of one per row."""
+    data = request.get_json(force=True)
+    board_id = None
+    changed = []
+    for u in data.get("items", []):
+        item = Item.query.get(u["id"])
+        if not item:
+            continue
+        board_id = item.board_id
+        if "group_id" in u:
+            item.group_id = u["group_id"]
+        item.position = u["position"]
+        changed.append(item)
+    db.session.commit()
+    if board_id:
+        socketio.emit("items_reordered", [i.to_dict() for i in changed], room=f"board_{board_id}")
+    return jsonify({"success": True})
+
+
+@app.route("/api/items/bulk_delete", methods=["POST"])
+def api_bulk_delete_items():
+    data = request.get_json(force=True)
+    ids = data.get("ids", [])
+    user = current_user()
+    board_id = None
+    for iid in ids:
+        item = Item.query.get(iid)
+        if item:
+            board_id = item.board_id
+            db.session.add(ActivityLog(board_id=board_id, user_id=user.id, action="deleted_item", detail=item.name))
+            db.session.delete(item)
+    db.session.commit()
+    if board_id:
+        socketio.emit("items_bulk_deleted", {"ids": ids}, room=f"board_{board_id}")
+    return jsonify({"success": True})
+
+
+@app.route("/api/items/bulk_duplicate", methods=["POST"])
+def api_bulk_duplicate_items():
+    data = request.get_json(force=True)
+    ids = data.get("ids", [])
+    user = current_user()
+    board_id = None
+    created = []
+    for iid in ids:
+        item = Item.query.get(iid)
+        if not item:
+            continue
+        board_id = item.board_id
+        position = Item.query.filter_by(group_id=item.group_id).count()
+        dup = Item(board_id=item.board_id, group_id=item.group_id, name=f"{item.name} (copy)",
+                   position=position, created_by=user.id)
+        db.session.add(dup)
+        db.session.flush()
+        for cv in item.values:
+            db.session.add(ColumnValue(item_id=dup.id, column_id=cv.column_id, value_json=cv.value_json))
+        created.append(dup)
+    db.session.commit()
+    if board_id:
+        for it in created:
+            socketio.emit("item_created", it.to_dict(), room=f"board_{board_id}")
+    return jsonify({"success": True})
+
+
+@app.route("/api/items/bulk_set_value", methods=["POST"])
+def api_bulk_set_value():
+    data = request.get_json(force=True)
+    ids = data.get("ids", [])
+    column_id = data.get("column_id")
+    value = data.get("value", {})
+    user = current_user()
+    column = Column.query.get_or_404(column_id)
+    board_id = column.board_id
+    for iid in ids:
+        item = Item.query.get(iid)
+        if not item or item.board_id != board_id:
+            continue
+        cv = ColumnValue.query.filter_by(item_id=iid, column_id=column_id).first()
+        if cv is None:
+            cv = ColumnValue(item_id=iid, column_id=column_id)
+            db.session.add(cv)
+        cv.value = value
+        cv.updated_by = user.id
+        socketio.emit("value_updated",
+                      {"item_id": iid, "column_id": column_id, "value": value, "updated_by": user.to_dict()},
+                      room=f"board_{board_id}")
+    db.session.add(ActivityLog(board_id=board_id, user_id=user.id, action="changed_value",
+                                detail=f"Bulk-updated {column.name} on {len(ids)} items"))
+    db.session.commit()
+    return jsonify({"success": True})
+
+
 @app.route("/api/items/<int:item_id>/values/<int:column_id>", methods=["PUT"])
 def api_set_value(item_id, column_id):
     """The single most-used endpoint — every cell edit on the board goes
@@ -537,7 +692,72 @@ def api_set_value(item_id, column_id):
 
     payload = {"item_id": item_id, "column_id": column_id, "value": new_value, "updated_by": user.to_dict()}
     socketio.emit("value_updated", payload, room=f"board_{item.board_id}")
+    _run_automations(item, column, new_value)
     return jsonify(payload)
+
+
+def _run_automations(item, column, value):
+    """Evaluate "when status changes to X" recipes after a status/priority
+    cell edit. Kept deliberately to one trigger shape (a specific label on
+    a specific column) — matches monday's own simplest automation recipes."""
+    if column.type not in ("status", "priority"):
+        return
+    label_id = value.get("label_id")
+    if not label_id:
+        return
+    rules = Automation.query.filter_by(board_id=item.board_id, column_id=column.id,
+                                        trigger_label_id=str(label_id)).all()
+    if not rules:
+        return
+    for rule in rules:
+        if rule.action_type == "move_to_group" and rule.target_group_id:
+            target = Group.query.get(rule.target_group_id)
+            if target and target.board_id == item.board_id and target.id != item.group_id:
+                item.group_id = target.id
+                item.position = Item.query.filter_by(group_id=target.id).count()
+                socketio.emit("item_updated", item.to_dict(), room=f"board_{item.board_id}")
+        elif rule.action_type == "notify_person" and rule.target_user_id:
+            notified = User.query.get(rule.target_user_id)
+            if notified:
+                note = Update(item_id=item.id, user_id=None,
+                               body=f"🤖 Automation notified {notified.name} — {column.name} changed.")
+                db.session.add(note)
+                db.session.flush()
+                update_payload = note.to_dict()
+                update_payload["user"] = {"id": None, "name": "Automation", "color": "#a25ddc"}
+                socketio.emit("update_posted", update_payload, room=f"board_{item.board_id}")
+                db.session.add(ActivityLog(board_id=item.board_id, item_id=item.id, user_id=notified.id,
+                                            action="automation_notify",
+                                            detail=f"notified via automation on {column.name}"))
+    db.session.commit()
+
+
+# ── Automations ("when status changes to X, do Y") ──────────────────────
+
+@app.route("/api/boards/<int:board_id>/automations", methods=["GET", "POST"])
+def api_automations(board_id):
+    if request.method == "GET":
+        return jsonify([a.to_dict() for a in Automation.query.filter_by(board_id=board_id).all()])
+    data = request.get_json(force=True)
+    action_type = data.get("action_type")
+    if action_type not in AUTOMATION_ACTIONS:
+        return jsonify({"error": f"Unknown action: {action_type}"}), 400
+    automation = Automation(
+        board_id=board_id, column_id=data["column_id"], trigger_label_id=str(data["trigger_label_id"]),
+        action_type=action_type, target_group_id=data.get("target_group_id"),
+        target_user_id=data.get("target_user_id"),
+    )
+    db.session.add(automation)
+    db.session.commit()
+    return jsonify(automation.to_dict())
+
+
+@app.route("/api/automations/<int:automation_id>", methods=["DELETE"])
+def api_delete_automation(automation_id):
+    automation = Automation.query.get_or_404(automation_id)
+    db.session.delete(automation)
+    db.session.commit()
+    return jsonify({"success": True})
 
 
 @app.route("/api/items/<int:item_id>/updates", methods=["GET", "POST"])

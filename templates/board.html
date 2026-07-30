@@ -20,7 +20,7 @@
         <button class="icon-btn-sm" onclick="openBoardSettingsMenu(event)" title="Board settings">⋮</button>
       </div>
     </div>
-    <div class="board-desc">{{ board.description or 'No description' }}</div>
+    <div class="board-desc" id="boardDesc" contenteditable="true" data-placeholder="Add a description">{{ board.description or '' }}</div>
   </div>
   <div class="board-tabs" id="boardTabs"></div>
   <div class="board-toolbar">
@@ -39,6 +39,7 @@
       <button class="tb-btn" id="hideBtn" onclick="toggleHidePanel(event)">👁 Hide</button>
     </div>
   </div>
+  <div class="bulk-action-bar" id="bulkActionBar" style="display:none;"></div>
   <div class="board-scroll" id="boardScroll"></div>
 </div>
 
@@ -102,6 +103,29 @@
       <button class="btn-ghost" onclick="closeRenameColumnModal()">Cancel</button>
       <button class="btn-primary" onclick="submitRenameColumn()">Save</button>
     </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="automationsModal" style="display:none;">
+  <div class="modal" style="width:420px;">
+    <div class="modal-hdr">Automations</div>
+    <div id="automationsList" style="margin-bottom:14px;max-height:200px;overflow-y:auto;"></div>
+    <div id="automationsForm" style="border-top:1px solid var(--border);padding-top:12px;">
+      <div style="font-size:12px;font-weight:700;color:var(--text-dim);margin-bottom:8px;">When status changes to…</div>
+      <select id="autoColumn"></select>
+      <select id="autoLabel"></select>
+      <select id="autoAction" onchange="onAutoActionChange()">
+        <option value="move_to_group">Move item to group</option>
+        <option value="notify_person">Notify a person</option>
+      </select>
+      <select id="autoTargetGroup"></select>
+      <select id="autoTargetUser" style="display:none;"></select>
+      <button class="btn-primary" style="width:100%;margin-top:4px;" onclick="submitAutomation()">+ Add automation</button>
+    </div>
+    <div id="automationsNoCols" style="display:none;color:var(--text-faint);font-size:13px;">
+      Add a Status or Priority column to this board to create automations.
+    </div>
+    <div class="modal-actions"><button class="btn-ghost" onclick="closeAutomationsModal()">Close</button></div>
   </div>
 </div>
 
