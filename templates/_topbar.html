@@ -1,0 +1,13 @@
+<div class="topbar">
+  <div class="global-search">
+    <span class="global-search-icon">⌕</span>
+    <input id="globalSearchInput" placeholder="Search for anything…" autocomplete="off"
+           oninput="onGlobalSearchInput(this.value)"/>
+    <div id="searchDropdown" class="search-dropdown" style="display:none;"></div>
+  </div>
+  <div class="topbar-actions">
+    <button class="bell-btn" onclick="toggleBellPanel()" title="Notifications">🔔</button>
+    <div id="bellPanel" class="bell-panel" style="display:none;"></div>
+    <div class="user-chip" style="background:{{ user.color }};" title="{{ user.name }}">{{ user.name[0]|upper }}</div>
+  </div>
+</div>

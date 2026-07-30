@@ -48,6 +48,15 @@ COLUMN_TYPES = {
     "link":     {"label": "Link"},         # value = {"url": "...", "text": "..."}
     "priority": {"label": "Priority"},     # same shape as status, distinct color palette convention
     "progress": {"label": "Progress"},     # value = {"number": 0-100}, rendered as a filled bar
+    "files":    {"label": "Files"},        # value = {"files": [{"id","name","url"}]}
+}
+
+# Board view types — a board can have several views over the same items,
+# the same way monday.com lets you look at one board as a table, a
+# kanban board, etc.
+VIEW_TYPES = {
+    "table":  {"label": "Table"},
+    "kanban": {"label": "Kanban"},
 }
 
 # Default status/priority label palettes — every new "status"/"priority"
@@ -92,6 +101,19 @@ class User(db.Model):
         return {"id": self.id, "name": self.name, "email": self.email, "color": self.color}
 
 
+class Folder(db.Model):
+    """A sidebar grouping for boards — matches monday.com's workspace
+    folders (e.g. the reference screenshot's "Content" > "AJ" tree)."""
+    __tablename__ = "folders"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    position = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime(timezone=True), default=_now)
+
+    def to_dict(self):
+        return {"id": self.id, "name": self.name, "position": self.position}
+
+
 class Board(db.Model):
     __tablename__ = "boards"
     id = db.Column(db.Integer, primary_key=True)
@@ -101,16 +123,47 @@ class Board(db.Model):
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     created_at = db.Column(db.DateTime(timezone=True), default=_now)
     archived = db.Column(db.Boolean, default=False)
+    starred = db.Column(db.Boolean, default=False)
+    folder_id = db.Column(db.Integer, db.ForeignKey("folders.id"), nullable=True)
 
     groups = db.relationship("Group", backref="board", order_by="Group.position", cascade="all, delete-orphan")
     columns = db.relationship("Column", backref="board", order_by="Column.position", cascade="all, delete-orphan")
     items = db.relationship("Item", backref="board", cascade="all, delete-orphan")
+    views = db.relationship("View", backref="board", order_by="View.position", cascade="all, delete-orphan")
 
     def to_dict(self):
         return {
             "id": self.id, "name": self.name, "description": self.description,
             "icon": self.icon, "created_at": self.created_at.isoformat() if self.created_at else None,
+            "archived": self.archived, "starred": self.starred, "folder_id": self.folder_id,
         }
+
+
+class View(db.Model):
+    """One way of looking at a board's items — table, kanban, etc. Every
+    board always has at least one (seeded "Main table" on creation)."""
+    __tablename__ = "views"
+    id = db.Column(db.Integer, primary_key=True)
+    board_id = db.Column(db.Integer, db.ForeignKey("boards.id"), nullable=False)
+    name = db.Column(db.String(200), nullable=False)
+    type = db.Column(db.String(20), nullable=False, default="table")
+    position = db.Column(db.Integer, nullable=False, default=0)
+    settings_json = db.Column(db.Text, default="{}")
+
+    @property
+    def settings(self):
+        try:
+            return json.loads(self.settings_json or "{}")
+        except Exception:
+            return {}
+
+    @settings.setter
+    def settings(self, value):
+        self.settings_json = json.dumps(value)
+
+    def to_dict(self):
+        return {"id": self.id, "board_id": self.board_id, "name": self.name, "type": self.type,
+                "position": self.position, "settings": self.settings}
 
 
 class Group(db.Model):
@@ -229,3 +282,8 @@ class ActivityLog(db.Model):
     action = db.Column(db.String(50), nullable=False)  # e.g. "created_item", "changed_value", "created_column"
     detail = db.Column(db.Text, default="")
     created_at = db.Column(db.DateTime(timezone=True), default=_now)
+
+    def to_dict(self):
+        return {"id": self.id, "board_id": self.board_id, "item_id": self.item_id, "user_id": self.user_id,
+                "action": self.action, "detail": self.detail,
+                "created_at": self.created_at.isoformat() if self.created_at else None}

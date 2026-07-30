@@ -4,25 +4,26 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>AJD Work — Setup</title>
+<link rel="icon" href="/static/img/logo.png"/>
 <style>
   *{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif;}
-  body{background:#f5f6f8;min-height:100vh;display:flex;align-items:center;justify-content:center;}
-  .card{background:#fff;border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,0.08);padding:40px;width:380px;}
-  .logo{font-size:22px;font-weight:900;letter-spacing:1px;color:#1a3a6b;margin-bottom:4px;}
-  .logo span{color:#00c875;}
-  .sub{font-size:13px;color:#676879;margin-bottom:24px;}
-  label{display:block;font-size:12px;font-weight:700;color:#323338;margin:14px 0 6px;}
-  input{width:100%;padding:10px 12px;border:1px solid #d0d4e4;border-radius:8px;font-size:14px;}
-  input:focus{outline:none;border-color:#579bfc;}
-  button{width:100%;margin-top:22px;background:#1a3a6b;color:#fff;border:none;padding:11px;border-radius:8px;
+  body{background:#14151f;min-height:100vh;display:flex;align-items:center;justify-content:center;}
+  .card{background:#1c1e2d;border:1px solid #2f3146;border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,0.4);padding:40px;width:380px;}
+  .logo-img{max-width:220px;height:auto;display:block;margin-bottom:4px;}
+  .sub{font-size:13px;color:#9295ac;margin-bottom:24px;}
+  label{display:block;font-size:12px;font-weight:700;color:#e4e6f0;margin:14px 0 6px;}
+  input{width:100%;padding:10px 12px;border:1px solid #2f3146;border-radius:8px;font-size:14px;
+    background:#14151f;color:#e4e6f0;}
+  input:focus{outline:none;border-color:#0073ea;}
+  button{width:100%;margin-top:22px;background:#0073ea;color:#fff;border:none;padding:11px;border-radius:8px;
     font-size:14px;font-weight:700;cursor:pointer;}
-  button:hover{background:#15305a;}
-  .error{color:#e2445c;font-size:12px;margin-top:10px;}
+  button:hover{background:#1a86ff;}
+  .error{color:#ff6b81;font-size:12px;margin-top:10px;}
 </style>
 </head>
 <body>
 <div class="card">
-  <div class="logo">AJD <span>Work</span></div>
+  <img src="/static/img/logo.png" alt="AJ Danboise" class="logo-img"/>
   <div class="sub">First-time setup — create the admin account</div>
   <form id="setupForm">
     <label>Your Name</label>

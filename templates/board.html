@@ -4,26 +4,39 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>{{ board.name }} — AJD Work</title>
+<link rel="icon" href="/static/img/logo.png"/>
 <link rel="stylesheet" href="/static/css/app.css"/>
 </head>
 <body>
 {% include "_sidebar.html" %}
 <div class="main">
+  {% include "_topbar.html" %}
   <div class="board-topbar">
     <div class="board-title-row">
       <span class="board-icon">{{ board.icon }}</span>
       <span class="board-title" id="boardTitle" contenteditable="true">{{ board.name }}</span>
+      <div class="board-title-actions">
+        <button class="star-toggle" id="boardStarBtn" onclick="toggleBoardStar()" title="Favorite">★</button>
+        <button class="icon-btn-sm" onclick="openBoardSettingsMenu(event)" title="Board settings">⋮</button>
+      </div>
     </div>
     <div class="board-desc">{{ board.description or 'No description' }}</div>
   </div>
-  <div class="board-tabs">
-    <span class="board-tab active">Main table</span>
-  </div>
+  <div class="board-tabs" id="boardTabs"></div>
   <div class="board-toolbar">
     <button class="btn-new-item" onclick="focusFirstAddItem()">+ New item</button>
     <div class="toolbar-search">
       <span class="toolbar-search-icon">⌕</span>
       <input id="boardSearch" placeholder="Search" oninput="setSearchQuery(this.value)"/>
+    </div>
+    <div style="position:relative;">
+      <button class="tb-btn" id="filterBtn" onclick="toggleFilterPanel(event)">▽ Filter</button>
+    </div>
+    <div style="position:relative;">
+      <button class="tb-btn" id="sortBtn" onclick="toggleSortPanel(event)">⇅ Sort</button>
+    </div>
+    <div style="position:relative;">
+      <button class="tb-btn" id="hideBtn" onclick="toggleHidePanel(event)">👁 Hide</button>
     </div>
   </div>
   <div class="board-scroll" id="boardScroll"></div>
@@ -46,6 +59,7 @@
       <option value="dropdown">Dropdown</option>
       <option value="checkbox">Checkbox</option>
       <option value="link">Link</option>
+      <option value="files">Files</option>
     </select>
     <div class="modal-actions">
       <button class="btn-ghost" onclick="closeNewColumnModal()">Cancel</button>
@@ -65,6 +79,43 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="newViewModal" style="display:none;">
+  <div class="modal">
+    <div class="modal-hdr">Add View</div>
+    <input id="newViewName" placeholder="View name" autofocus/>
+    <select id="newViewType">
+      <option value="table">Table</option>
+      <option value="kanban">Kanban</option>
+    </select>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeNewViewModal()">Cancel</button>
+      <button class="btn-primary" onclick="submitNewView()">Add</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="renameColumnModal" style="display:none;">
+  <div class="modal">
+    <div class="modal-hdr">Rename Column</div>
+    <input id="renameColName" placeholder="Column name" autofocus/>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeRenameColumnModal()">Cancel</button>
+      <button class="btn-primary" onclick="submitRenameColumn()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="confirmModal" style="display:none;">
+  <div class="modal">
+    <div class="modal-hdr" id="confirmModalHdr">Are you sure?</div>
+    <div id="confirmModalBody" style="font-size:13px;color:var(--text-dim);margin-bottom:6px;"></div>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeConfirmModal()">Cancel</button>
+      <button class="btn-primary" id="confirmModalOkBtn" style="background:#e2445c;">Delete</button>
+    </div>
+  </div>
+</div>
+
 <div class="updates-panel" id="updatesPanel" style="display:none;"></div>
 
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
@@ -72,6 +123,7 @@
 const USER = {{ user|tojson }};
 const BOARD_ID = {{ board.id }};
 </script>
+<script src="/static/js/common.js"></script>
 <script src="/static/js/board.js"></script>
 </body>
 </html>

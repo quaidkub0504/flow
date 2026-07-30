@@ -1,22 +1,109 @@
 <div class="sidebar">
-  <div class="sidebar-logo"><a href="/" style="color:inherit;text-decoration:none;">AJD <span>Work</span></a></div>
+  <div class="sidebar-logo"><a href="/"><img src="/static/img/logo.png" alt="AJ Danboise" class="sidebar-logo-img"/></a></div>
   <button class="new-board-btn" onclick="openNewBoardModal()">+ New Board</button>
-  <div class="sidebar-section-label">Boards</div>
+
+  <div id="sidebarFavorites" style="display:none;">
+    <div class="sidebar-section-label" style="padding:0 20px;margin-bottom:6px;">⭐ Favorites</div>
+    <div id="sidebarFavoritesList" class="sidebar-board-list" style="flex:none;margin-bottom:14px;"></div>
+  </div>
+
+  <div class="sidebar-row-flex">
+    <div class="sidebar-section-label">Boards</div>
+    <button class="icon-btn-sm" onclick="openNewFolderModal()" title="New folder">+</button>
+  </div>
   <div id="sidebarBoardList" class="sidebar-board-list"></div>
   <div class="sidebar-footer">
     <a href="/logout" class="sidebar-logout">Log out</a>
   </div>
 </div>
+
+<div class="modal-backdrop" id="newFolderModal" style="display:none;">
+  <div class="modal">
+    <div class="modal-hdr">New Folder</div>
+    <input id="newFolderName" placeholder="Folder name" autofocus/>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeNewFolderModal()">Cancel</button>
+      <button class="btn-primary" onclick="submitNewFolder()">Create</button>
+    </div>
+  </div>
+</div>
+
 <script>
-async function loadSidebarBoards(){
-  const r = await fetch('/api/boards');
-  const boards = await r.json();
-  const el = document.getElementById('sidebarBoardList');
-  const currentPath = window.location.pathname;
-  el.innerHTML = boards.map(b => `
-    <a class="sidebar-board-link ${currentPath === '/board/'+b.id ? 'active' : ''}" href="/board/${b.id}">
-      <span class="sb-icon">${b.icon}</span>${b.name.length > 22 ? b.name.slice(0,22)+'…' : b.name}
-    </a>`).join('');
+function sbEsc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+let SB_FOLDERS = [];
+let SB_BOARDS = [];
+const SB_COLLAPSE_KEY = 'ajdwork_folder_collapse';
+function sbCollapseState(){
+  try { return JSON.parse(localStorage.getItem(SB_COLLAPSE_KEY) || '{}'); } catch(e) { return {}; }
 }
+function sbToggleFolder(folderId){
+  const st = sbCollapseState();
+  st[folderId] = !st[folderId];
+  localStorage.setItem(SB_COLLAPSE_KEY, JSON.stringify(st));
+  renderSidebar();
+}
+
+function sbBoardLink(b){
+  const currentPath = window.location.pathname;
+  return `<a class="sidebar-board-link ${currentPath === '/board/'+b.id ? 'active' : ''}" href="/board/${b.id}">
+      <span class="sb-icon">${b.icon}</span>${b.name.length > 20 ? b.name.slice(0,20)+'…' : b.name}
+    </a>`;
+}
+
+function renderSidebar(){
+  const starred = SB_BOARDS.filter(b => b.starred);
+  const favSection = document.getElementById('sidebarFavorites');
+  if (starred.length) {
+    favSection.style.display = 'block';
+    document.getElementById('sidebarFavoritesList').innerHTML = starred.map(sbBoardLink).join('');
+  } else {
+    favSection.style.display = 'none';
+  }
+
+  const collapse = sbCollapseState();
+  const unfoldered = SB_BOARDS.filter(b => !b.folder_id);
+  let html = unfoldered.map(sbBoardLink).join('');
+  html += SB_FOLDERS.map(f => {
+    const boards = SB_BOARDS.filter(b => b.folder_id === f.id);
+    const collapsed = !!collapse[f.id];
+    return `
+      <div class="folder-row" onclick="sbToggleFolder(${f.id})">
+        <span class="folder-arrow ${collapsed ? 'collapsed' : ''}">▼</span>${sbEsc(f.name)}
+      </div>
+      <div class="folder-boards ${collapsed ? 'collapsed' : ''}" style="padding-left:14px;">
+        ${boards.length ? boards.map(sbBoardLink).join('') : '<div style="padding:4px 20px;color:var(--text-faint);font-size:12px;">Empty</div>'}
+      </div>`;
+  }).join('');
+  document.getElementById('sidebarBoardList').innerHTML = html;
+}
+
+async function loadSidebarBoards(){
+  const [boards, folders] = await Promise.all([
+    fetch('/api/boards').then(r => r.json()),
+    fetch('/api/folders').then(r => r.json()),
+  ]);
+  SB_BOARDS = boards;
+  SB_FOLDERS = folders;
+  renderSidebar();
+}
+
+function openNewFolderModal(){
+  document.getElementById('newFolderModal').style.display = 'flex';
+  document.getElementById('newFolderName').focus();
+}
+function closeNewFolderModal(){
+  document.getElementById('newFolderModal').style.display = 'none';
+  document.getElementById('newFolderName').value = '';
+}
+async function submitNewFolder(){
+  const name = document.getElementById('newFolderName').value.trim();
+  if (!name) return;
+  await fetch('/api/folders', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name})
+  });
+  closeNewFolderModal();
+  loadSidebarBoards();
+}
+
 loadSidebarBoards();
 </script>

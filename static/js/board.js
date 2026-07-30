@@ -1,9 +1,23 @@
-// AJD Work — board (table view) rendering + real-time sync engine.
-let STATE = { board: null, groups: [], columns: [], items: [] };
+// AJD Work — board rendering (table + kanban views) + real-time sync engine.
+let STATE = { board: null, groups: [], columns: [], items: [], views: [], currentViewId: null };
 let ALL_USERS = [];
 let socket = null;
+let SEARCH_QUERY = '';
+let FILTER_STATE = {};          // { columnId: Set(labelId/optionId) }
+let SORT_STATE = { columnId: null, dir: 'asc' };
+let HIDDEN_COLS = new Set();
+let RENAME_COLUMN_ID = null;
 
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function loadHiddenCols(){
+  try { return new Set(JSON.parse(localStorage.getItem(`ajdwork_hidden_${BOARD_ID}`) || '[]')); }
+  catch(e) { return new Set(); }
+}
+function saveHiddenCols(){
+  localStorage.setItem(`ajdwork_hidden_${BOARD_ID}`, JSON.stringify(Array.from(HIDDEN_COLS)));
+}
+function visibleColumns(){ return STATE.columns.filter(c => !HIDDEN_COLS.has(c.id)); }
 
 async function init(){
   const [boardResp, usersResp] = await Promise.all([
@@ -14,12 +28,22 @@ async function init(){
   STATE.groups = boardResp.groups.sort((a,b) => a.position - b.position);
   STATE.columns = boardResp.columns.sort((a,b) => a.position - b.position);
   STATE.items = boardResp.items;
+  STATE.views = boardResp.views.sort((a,b) => a.position - b.position);
+  STATE.currentViewId = STATE.views.length ? STATE.views[0].id : null;
   ALL_USERS = usersResp;
+  HIDDEN_COLS = loadHiddenCols();
+  document.getElementById('boardStarBtn').classList.toggle('starred', !!STATE.board.starred);
+
   render();
   connectSocket();
   wireBoardTitleEdit();
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.picker') && !e.target.closest('.cell')) closePicker();
+    if (!e.target.closest('.app-menu') && !e.target.closest('.th-menu-btn') && !e.target.closest('.row-menu-btn')
+        && !e.target.closest('#filterBtn') && !e.target.closest('#sortBtn') && !e.target.closest('#hideBtn')
+        && !e.target.closest('.icon-btn-sm') && !e.target.closest('.star-toggle')) {
+      closeAllMenus();
+    }
   });
 }
 
@@ -53,13 +77,35 @@ function connectSocket(){
     if (idx >= 0) STATE.columns[idx] = col;
     render();
   });
+  socket.on('column_deleted', ({id}) => {
+    STATE.columns = STATE.columns.filter(c => c.id !== id);
+    render();
+  });
   socket.on('group_created', (group) => {
     if (!STATE.groups.find(g => g.id === group.id)) STATE.groups.push(group);
+    render();
+  });
+  socket.on('view_created', (view) => {
+    if (!STATE.views.find(v => v.id === view.id)) STATE.views.push(view);
+    renderTabs();
+  });
+  socket.on('view_updated', (view) => {
+    const idx = STATE.views.findIndex(v => v.id === view.id);
+    if (idx >= 0) STATE.views[idx] = view;
+    render();
+  });
+  socket.on('view_deleted', ({id}) => {
+    STATE.views = STATE.views.filter(v => v.id !== id);
+    if (STATE.currentViewId === id) STATE.currentViewId = STATE.views[0] ? STATE.views[0].id : null;
     render();
   });
   socket.on('board_updated', (board) => {
     STATE.board = board;
     document.getElementById('boardTitle').textContent = board.name;
+    document.getElementById('boardStarBtn').classList.toggle('starred', !!board.starred);
+  });
+  socket.on('board_deleted', ({id}) => {
+    if (id === BOARD_ID) window.location.href = '/';
   });
   socket.on('update_posted', (upd) => {
     const panel = document.getElementById('updatesPanel');
@@ -67,20 +113,86 @@ function connectSocket(){
   });
 }
 
-let SEARCH_QUERY = '';
 function setSearchQuery(q){ SEARCH_QUERY = q.trim().toLowerCase(); render(); }
 function focusFirstAddItem(){
   const el = document.querySelector('.add-item-input');
   if (el) el.focus();
 }
 
+// ── Filter / Sort applied across every view ──────────────────────────────
+
+function applyFilterSearch(items){
+  return items.filter(i => {
+    if (SEARCH_QUERY && !i.name.toLowerCase().includes(SEARCH_QUERY)) return false;
+    for (const colId of Object.keys(FILTER_STATE)) {
+      const selected = FILTER_STATE[colId];
+      if (!selected || !selected.size) continue;
+      const col = STATE.columns.find(c => c.id === Number(colId));
+      if (!col) continue;
+      const val = i.values[colId] || i.values[Number(colId)] || {};
+      if (col.type === 'dropdown') {
+        const ids = val.option_ids || [];
+        if (!ids.some(id => selected.has(id))) return false;
+      } else {
+        if (!val.label_id || !selected.has(val.label_id)) return false;
+      }
+    }
+    return true;
+  });
+}
+function sortValueFor(item, col){
+  const val = item.values[col.id] || {};
+  switch (col.type) {
+    case 'status': case 'priority': {
+      const labels = col.settings.labels || [];
+      const idx = labels.findIndex(l => l.id === val.label_id);
+      return idx;
+    }
+    case 'number': case 'progress': return Number(val.number ?? -Infinity);
+    case 'date': return val.date || '';
+    case 'checkbox': return val.checked ? 1 : 0;
+    case 'long_text': case 'text': return (val.text || '').toLowerCase();
+    default: return 0;
+  }
+}
+function applySort(items){
+  if (!SORT_STATE.columnId) return [...items].sort((a,b) => a.position - b.position);
+  const col = STATE.columns.find(c => c.id === SORT_STATE.columnId);
+  if (!col) return items;
+  const dir = SORT_STATE.dir === 'desc' ? -1 : 1;
+  return [...items].sort((a,b) => {
+    const av = sortValueFor(a, col), bv = sortValueFor(b, col);
+    if (av < bv) return -1 * dir;
+    if (av > bv) return 1 * dir;
+    return 0;
+  });
+}
 function itemsForGroup(groupId){
-  return STATE.items.filter(i => i.group_id === groupId)
-    .filter(i => !SEARCH_QUERY || i.name.toLowerCase().includes(SEARCH_QUERY))
-    .sort((a,b) => a.position - b.position);
+  let items = STATE.items.filter(i => i.group_id === groupId);
+  items = applyFilterSearch(items);
+  return applySort(items);
 }
 
+// ── View dispatch ─────────────────────────────────────────────────────────
+
 function render(){
+  renderTabs();
+  const view = STATE.views.find(v => v.id === STATE.currentViewId) || STATE.views[0];
+  if (!view) { document.getElementById('boardScroll').innerHTML = ''; return; }
+  if (view.type === 'kanban') renderKanbanView();
+  else renderTableView();
+}
+function renderTabs(){
+  const el = document.getElementById('boardTabs');
+  el.innerHTML = STATE.views.map(v => `
+    <span class="board-tab ${v.id === STATE.currentViewId ? 'active' : ''}" onclick="switchView(${v.id})">${esc(v.name)}</span>
+  `).join('') + `<span class="board-tab-add" onclick="openNewViewModal()">+</span>`;
+}
+function switchView(viewId){ STATE.currentViewId = viewId; render(); }
+
+// ── Table view ────────────────────────────────────────────────────────────
+
+function renderTableView(){
   document.getElementById('boardScroll').innerHTML =
     STATE.groups.map(renderGroup).join('') +
     `<button class="add-group-btn" onclick="addGroup()">+ Add Group</button>`;
@@ -100,34 +212,55 @@ function renderGroup(group){
 }
 
 function renderTable(group, items){
+  const cols = visibleColumns();
   return `
     <table class="board-table">
       <thead><tr>
         <th style="min-width:240px;">Item</th>
-        ${STATE.columns.map(c => `<th style="width:${c.width}px;">${esc(c.name)}</th>`).join('')}
+        ${cols.map(c => `
+          <th style="width:${c.width}px;">
+            <div class="th-wrap">
+              <span>${esc(c.name)}${SORT_STATE.columnId===c.id ? `<span class="th-sort-indicator">${SORT_STATE.dir==='desc'?'↓':'↑'}</span>` : ''}</span>
+              <span class="th-menu-btn" onclick="openColumnMenu(event, ${c.id})">⋮</span>
+            </div>
+          </th>`).join('')}
         <th style="width:36px;"><span class="add-col-btn" onclick="openNewColumnModal()">+</span></th>
       </tr></thead>
       <tbody>
         ${items.map(item => renderRow(group, item)).join('')}
         <tr class="add-item-row">
-          <td colspan="${STATE.columns.length + 2}" style="border-left:4px solid ${group.color};">
+          <td colspan="${cols.length + 2}" style="border-left:4px solid ${group.color};">
             <input class="add-item-input" placeholder="+ Add item"
                    onkeydown="if(event.key==='Enter'){addItem(${group.id}, this);}"/>
           </td>
         </tr>
+        ${renderFooterRow(items, cols)}
       </tbody>
     </table>`;
 }
 
+function renderFooterRow(items, cols){
+  const sums = cols.map(c => (c.type === 'number' || c.type === 'progress')
+    ? items.reduce((acc,i) => acc + (Number((i.values[c.id]||{}).number) || 0), 0)
+    : null);
+  if (!sums.some(s => s !== null)) return '';
+  return `<tr class="footer-row">
+    <td class="footer-label">Sum</td>
+    ${cols.map((c,idx) => `<td>${sums[idx] !== null ? `<span class="footer-sum">${sums[idx]}</span>` : ''}</td>`).join('')}
+    <td></td>
+  </tr>`;
+}
+
 function renderRow(group, item){
+  const cols = visibleColumns();
   return `
     <tr data-item-id="${item.id}">
       <td class="item-name-cell" style="--gcolor:${group.color};" contenteditable="true"
           onblur="saveItemName(${item.id}, this)"
           onkeydown="if(event.key==='Enter'){event.preventDefault(); this.blur();}"
           ondblclick="openUpdates(${item.id})">${esc(item.name)}</td>
-      ${STATE.columns.map(col => `<td>${renderCell(item, col)}</td>`).join('')}
-      <td></td>
+      ${cols.map(col => `<td>${renderCell(item, col)}</td>`).join('')}
+      <td><div class="row-menu-btn" onclick="openRowMenu(event, ${item.id})">⋮</div></td>
     </tr>`;
 }
 
@@ -185,7 +318,13 @@ function renderCell(item, col){
       const opts = col.settings.options || [];
       const selected = (val.option_ids || []).map(id => opts.find(o => o.id === id)).filter(Boolean);
       return `<div class="cell" onclick="openDropdownPicker(event, ${item.id}, ${col.id})">
-        ${selected.length ? selected.map(o => `<span class="pill" style="background:#579bfc;margin-right:2px;">${esc(o.text)}</span>`).join('') : `<span class="pill empty">Empty</span>`}
+        ${selected.length ? selected.map(o => `<span class="pill" style="background:#579bfc;margin-right:2px;">${esc(o.text)}</span>`).join('') : `<span class="pill empty"></span>`}
+      </div>`;
+    }
+    case 'files': {
+      const files = val.files || [];
+      return `<div class="cell" style="height:auto;min-height:36px;flex-wrap:wrap;padding:4px 8px;" onclick="openFilesPicker(event, ${item.id}, ${col.id})">
+        ${files.length ? files.map(f => `<a class="file-chip" href="${esc(f.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation();">📎 ${esc(f.name)}</a>`).join('') : `<span class="pill empty"></span>`}
       </div>`;
     }
     case 'link': {
@@ -203,6 +342,57 @@ function renderCell(item, col){
       </div>`;
     }
   }
+}
+
+// ── Kanban view ───────────────────────────────────────────────────────────
+
+function renderKanbanView(){
+  const container = document.getElementById('boardScroll');
+  const statusCol = STATE.columns.find(c => c.type === 'status');
+  if (!statusCol) {
+    container.innerHTML = `<div class="empty-state">Add a Status column to use the Kanban view.</div>`;
+    return;
+  }
+  const labels = statusCol.settings.labels || [];
+  const items = applyFilterSearch(STATE.items.slice());
+  const buckets = labels.map(l => ({label: l, items: items.filter(i => (i.values[statusCol.id]||{}).label_id === l.id)}));
+  const noStatus = items.filter(i => !(i.values[statusCol.id]||{}).label_id);
+  const allBuckets = buckets.concat([{label: {id: null, text: 'No Status', color: '#9295ac'}, items: noStatus}]);
+  container.innerHTML = `<div class="kanban-board">
+    ${allBuckets.map(b => `
+      <div class="kanban-col" style="--kcolor:${b.label.color};">
+        <div class="kanban-col-hdr">
+          <span class="kanban-col-title">${esc(b.label.text)}</span>
+          <span class="kanban-col-count">${b.items.length}</span>
+        </div>
+        <div class="kanban-cards">${b.items.map(renderKanbanCard).join('')}</div>
+        <div class="kanban-add-card" onclick="addKanbanCard(${statusCol.id}, ${b.label.id ? `'${b.label.id}'` : 'null'})">+ Add card</div>
+      </div>`).join('')}
+  </div>`;
+}
+function renderKanbanCard(item){
+  const personCol = STATE.columns.find(c => c.type === 'person');
+  let avatarsHtml = '';
+  if (personCol) {
+    const ids = (item.values[personCol.id]||{}).user_ids || [];
+    const users = ids.map(uid => ALL_USERS.find(u => u.id === uid)).filter(Boolean);
+    if (users.length) avatarsHtml = `<div class="avatar-stack">${users.map(u => `<div class="avatar" style="background:${u.color};width:22px;height:22px;font-size:10px;">${esc(u.name[0].toUpperCase())}</div>`).join('')}</div>`;
+  }
+  return `<div class="kanban-card" onclick="openUpdates(${item.id})">
+    <div class="kanban-card-name">${esc(item.name)}</div>
+    <div class="kanban-card-meta">${avatarsHtml}</div>
+  </div>`;
+}
+async function addKanbanCard(statusColId, labelId){
+  const group = STATE.groups[0];
+  if (!group) return;
+  const r = await fetch(`/api/groups/${group.id}/items`, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name: 'New Item'})
+  });
+  const item = await r.json();
+  if (!STATE.items.find(i => i.id === item.id)) STATE.items.push(item);
+  if (labelId) await saveValue(item.id, statusColId, {label_id: labelId});
+  render();
 }
 
 // ── Mutations ────────────────────────────────────────────────────────────
@@ -262,6 +452,252 @@ function wireBoardTitleEdit(){
   el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); } });
 }
 
+// ── Generic popover menu helper (column/row/board-settings menus) ────────
+
+function openMenuAt(evt, html){
+  evt.stopPropagation();
+  closePicker();
+  closeAllMenus();
+  const rect = evt.currentTarget.getBoundingClientRect();
+  const menu = document.createElement('div');
+  menu.className = 'menu app-menu';
+  menu.style.position = 'fixed';
+  menu.style.top = (rect.bottom + 4) + 'px';
+  menu.style.left = Math.min(rect.left, window.innerWidth - 210) + 'px';
+  menu.innerHTML = html;
+  document.body.appendChild(menu);
+}
+function closeAllMenus(){ document.querySelectorAll('.app-menu').forEach(m => m.remove()); }
+
+// ── Column header menu ────────────────────────────────────────────────────
+
+function openColumnMenu(evt, colId){
+  openMenuAt(evt, `
+    <div class="menu-item" onclick="openRenameColumnModal(${colId})">✎ Rename</div>
+    <div class="menu-item" onclick="duplicateColumn(${colId})">⎘ Duplicate</div>
+    <div class="menu-sep"></div>
+    <div class="menu-item danger" onclick="confirmDeleteColumn(${colId})">🗑 Delete</div>
+  `);
+}
+function openRenameColumnModal(colId){
+  closeAllMenus();
+  const col = STATE.columns.find(c => c.id === colId);
+  RENAME_COLUMN_ID = colId;
+  document.getElementById('renameColName').value = col.name;
+  document.getElementById('renameColumnModal').style.display = 'flex';
+  document.getElementById('renameColName').focus();
+}
+function closeRenameColumnModal(){ document.getElementById('renameColumnModal').style.display = 'none'; }
+async function submitRenameColumn(){
+  const name = document.getElementById('renameColName').value.trim();
+  if (name && RENAME_COLUMN_ID) {
+    await fetch(`/api/columns/${RENAME_COLUMN_ID}`, {
+      method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name})
+    });
+  }
+  closeRenameColumnModal();
+}
+async function duplicateColumn(colId){
+  closeAllMenus();
+  await fetch(`/api/columns/${colId}/duplicate`, {method: 'POST'});
+}
+function confirmDeleteColumn(colId){
+  closeAllMenus();
+  const col = STATE.columns.find(c => c.id === colId);
+  confirmAction('Delete column', `Delete "${col.name}" and all its values? This can't be undone.`, 'Delete', async () => {
+    await fetch(`/api/columns/${colId}`, {method: 'DELETE'});
+  });
+}
+
+// ── Row menu ──────────────────────────────────────────────────────────────
+
+function openRowMenu(evt, itemId){
+  openMenuAt(evt, `
+    <div class="menu-item" onclick="closeAllMenus();openUpdates(${itemId})">⤢ Open</div>
+    <div class="menu-item" onclick="duplicateItemRow(${itemId})">⎘ Duplicate</div>
+    <div class="menu-sep"></div>
+    <div class="menu-item danger" onclick="confirmDeleteItem(${itemId})">🗑 Delete</div>
+  `);
+}
+async function duplicateItemRow(itemId){
+  closeAllMenus();
+  await fetch(`/api/items/${itemId}/duplicate`, {method: 'POST'});
+}
+function confirmDeleteItem(itemId){
+  closeAllMenus();
+  const item = STATE.items.find(i => i.id === itemId);
+  confirmAction('Delete item', `Delete "${item.name}"? This can't be undone.`, 'Delete', async () => {
+    await fetch(`/api/items/${itemId}`, {method: 'DELETE'});
+  });
+}
+
+// ── Board settings menu (star / duplicate / move / archive / delete) ────
+
+function toggleBoardStar(){
+  const newVal = !STATE.board.starred;
+  STATE.board.starred = newVal;
+  document.getElementById('boardStarBtn').classList.toggle('starred', newVal);
+  fetch(`/api/boards/${BOARD_ID}`, {
+    method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({starred: newVal})
+  });
+}
+async function openBoardSettingsMenu(evt){
+  evt.stopPropagation();
+  const folders = await fetch('/api/folders').then(r => r.json());
+  const folderItems = folders.map(f => `<div class="menu-item" onclick="moveBoardToFolder(${f.id})">📁 ${esc(f.name)}</div>`).join('');
+  openMenuAt(evt, `
+    <div class="menu-item" onclick="duplicateBoardFromPage()">⎘ Duplicate board</div>
+    <div class="menu-sep"></div>
+    <div class="filter-col-name" style="padding:6px 10px 2px;">Move to folder</div>
+    <div class="menu-item" onclick="moveBoardToFolder(null)">— No folder</div>
+    ${folderItems}
+    <div class="menu-sep"></div>
+    <div class="menu-item" onclick="archiveBoardFromPage()">🗄 Archive board</div>
+    <div class="menu-item danger" onclick="confirmDeleteBoard()">🗑 Delete board</div>
+  `);
+}
+async function duplicateBoardFromPage(){
+  closeAllMenus();
+  const r = await fetch(`/api/boards/${BOARD_ID}/duplicate`, {method: 'POST'});
+  const board = await r.json();
+  window.location.href = '/board/' + board.id;
+}
+async function moveBoardToFolder(folderId){
+  closeAllMenus();
+  await fetch(`/api/boards/${BOARD_ID}`, {
+    method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({folder_id: folderId})
+  });
+}
+async function archiveBoardFromPage(){
+  closeAllMenus();
+  await fetch(`/api/boards/${BOARD_ID}`, {
+    method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({archived: true})
+  });
+  window.location.href = '/';
+}
+function confirmDeleteBoard(){
+  closeAllMenus();
+  confirmAction('Delete board', `Delete "${STATE.board.name}" permanently? This can't be undone.`, 'Delete', async () => {
+    await fetch(`/api/boards/${BOARD_ID}`, {method: 'DELETE'});
+    window.location.href = '/';
+  });
+}
+
+// ── Confirm modal (replaces native confirm() everywhere in this app) ─────
+
+function confirmAction(title, body, okLabel, onConfirm){
+  document.getElementById('confirmModalHdr').textContent = title;
+  document.getElementById('confirmModalBody').textContent = body;
+  const okBtn = document.getElementById('confirmModalOkBtn');
+  okBtn.textContent = okLabel || 'Delete';
+  okBtn.onclick = () => { closeConfirmModal(); onConfirm(); };
+  document.getElementById('confirmModal').style.display = 'flex';
+}
+function closeConfirmModal(){ document.getElementById('confirmModal').style.display = 'none'; }
+
+// ── Filter / Sort / Hide toolbar panels ──────────────────────────────────
+
+function toggleFilterPanel(evt){
+  evt.stopPropagation();
+  if (document.getElementById('filterPanelEl')) { closeAllMenus(); return; }
+  closeAllMenus();
+  const cols = STATE.columns.filter(c => ['status','priority','dropdown'].includes(c.type));
+  let html = cols.length ? '' : `<div style="padding:6px;color:var(--text-faint);font-size:12px;">No filterable columns (add a Status, Priority, or Dropdown column)</div>`;
+  cols.forEach(c => {
+    const opts = c.type === 'dropdown' ? (c.settings.options || []) : (c.settings.labels || []);
+    const selected = FILTER_STATE[c.id] || new Set();
+    html += `<div class="filter-col-block"><div class="filter-col-name">${esc(c.name)}</div>`;
+    opts.forEach(o => {
+      const on = selected.has(o.id);
+      html += `<span class="filter-chip ${on?'on':''}" style="background:${o.color || '#579bfc'};" onclick="toggleFilterChip(${c.id},'${o.id}')">${esc(o.text)}</span>`;
+    });
+    html += `</div>`;
+  });
+  if (cols.length) html += `<div class="menu-item" style="justify-content:center;color:var(--accent-blue);" onclick="clearFilters()">Clear all filters</div>`;
+  const rect = evt.currentTarget.getBoundingClientRect();
+  const panel = document.createElement('div');
+  panel.id = 'filterPanelEl';
+  panel.className = 'filter-panel app-menu';
+  panel.style.position = 'fixed'; panel.style.top = (rect.bottom+6)+'px'; panel.style.left = rect.left+'px';
+  panel.innerHTML = html;
+  document.body.appendChild(panel);
+}
+function toggleFilterChip(colId, optId){
+  if (!FILTER_STATE[colId]) FILTER_STATE[colId] = new Set();
+  const set = FILTER_STATE[colId];
+  if (set.has(optId)) set.delete(optId); else set.add(optId);
+  closeAllMenus();
+  updateToolbarActiveStates();
+  render();
+}
+function clearFilters(){ FILTER_STATE = {}; closeAllMenus(); updateToolbarActiveStates(); render(); }
+
+function toggleSortPanel(evt){
+  evt.stopPropagation();
+  if (document.getElementById('sortPanelEl')) { closeAllMenus(); return; }
+  closeAllMenus();
+  const sortable = STATE.columns.filter(c => !['person','link','files','timeline'].includes(c.type));
+  let html = sortable.map(c => `
+    <div class="sort-row" onclick="setSort(${c.id},'asc')"><span>${esc(c.name)}</span><span>↑</span></div>
+    <div class="sort-row" onclick="setSort(${c.id},'desc')"><span>${esc(c.name)}</span><span>↓</span></div>
+  `).join('');
+  html += `<div class="menu-sep"></div><div class="menu-item" onclick="clearSort()">Clear sort</div>`;
+  const rect = evt.currentTarget.getBoundingClientRect();
+  const panel = document.createElement('div');
+  panel.id = 'sortPanelEl';
+  panel.className = 'sort-panel app-menu';
+  panel.style.position = 'fixed'; panel.style.top = (rect.bottom+6)+'px'; panel.style.left = rect.left+'px';
+  panel.innerHTML = html;
+  document.body.appendChild(panel);
+}
+function setSort(colId, dir){
+  SORT_STATE = {columnId: colId, dir};
+  closeAllMenus();
+  updateToolbarActiveStates();
+  render();
+}
+function clearSort(){
+  SORT_STATE = {columnId: null, dir: 'asc'};
+  closeAllMenus();
+  updateToolbarActiveStates();
+  render();
+}
+
+function toggleHidePanel(evt){
+  evt.stopPropagation();
+  if (document.getElementById('hidePanelEl')) { closeAllMenus(); return; }
+  closeAllMenus();
+  const rect = evt.currentTarget.getBoundingClientRect();
+  const panel = document.createElement('div');
+  panel.id = 'hidePanelEl';
+  panel.className = 'hide-panel app-menu';
+  panel.style.position = 'fixed'; panel.style.top = (rect.bottom+6)+'px'; panel.style.left = rect.left+'px';
+  panel.innerHTML = hidePanelRows();
+  document.body.appendChild(panel);
+}
+function hidePanelRows(){
+  return STATE.columns.map(c => `
+    <div class="hide-row" onclick="toggleHideColumn(${c.id})">
+      <span>${esc(c.name)}</span><input type="checkbox" ${HIDDEN_COLS.has(c.id)?'':'checked'} onclick="return false;"/>
+    </div>`).join('');
+}
+function toggleHideColumn(colId){
+  if (HIDDEN_COLS.has(colId)) HIDDEN_COLS.delete(colId); else HIDDEN_COLS.add(colId);
+  saveHiddenCols();
+  updateToolbarActiveStates();
+  const panel = document.getElementById('hidePanelEl');
+  if (panel) panel.innerHTML = hidePanelRows();
+  render();
+}
+function updateToolbarActiveStates(){
+  const filterBtn = document.getElementById('filterBtn');
+  const sortBtn = document.getElementById('sortBtn');
+  const hideBtn = document.getElementById('hideBtn');
+  if (filterBtn) filterBtn.classList.toggle('active-filter', Object.values(FILTER_STATE).some(s => s.size));
+  if (sortBtn) sortBtn.classList.toggle('active-filter', !!SORT_STATE.columnId);
+  if (hideBtn) hideBtn.classList.toggle('active-filter', HIDDEN_COLS.size > 0);
+}
+
 // ── Column modal ─────────────────────────────────────────────────────────
 
 function openNewColumnModal(){ document.getElementById('newColumnModal').style.display = 'flex'; }
@@ -292,13 +728,36 @@ async function submitNewBoard(){
   const name = document.getElementById('newBoardName').value.trim();
   if (!name) return;
   const r = await fetch('/api/boards', {
-    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name})
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name})
   });
   const board = await r.json();
   window.location.href = '/board/' + board.id;
 }
 
-// ── Pickers (status/priority, person, dropdown) ─────────────────────────
+// New-view modal
+function openNewViewModal(){
+  document.getElementById('newViewModal').style.display = 'flex';
+  document.getElementById('newViewName').focus();
+}
+function closeNewViewModal(){
+  document.getElementById('newViewModal').style.display = 'none';
+  document.getElementById('newViewName').value = '';
+}
+async function submitNewView(){
+  const name = document.getElementById('newViewName').value.trim() || 'View';
+  const type = document.getElementById('newViewType').value;
+  const r = await fetch(`/api/boards/${BOARD_ID}/views`, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name, type})
+  });
+  const view = await r.json();
+  if (!STATE.views.find(v => v.id === view.id)) STATE.views.push(view);
+  STATE.currentViewId = view.id;
+  closeNewViewModal();
+  render();
+}
+
+// ── Pickers (status/priority, person, dropdown, files, progress) ────────
 
 function closePicker(){
   document.querySelectorAll('.picker').forEach(p => p.remove());
@@ -407,19 +866,68 @@ function saveProgress(itemId, columnId){
   render();
 }
 
-// ── Updates (per-item comment thread) ────────────────────────────────────
+function openFilesPicker(evt, itemId, columnId){
+  evt.stopPropagation();
+  closePicker();
+  const item = STATE.items.find(i => i.id === itemId);
+  const files = (item.values[columnId] || {}).files || [];
+  const picker = document.createElement('div');
+  picker.className = 'picker files-picker';
+  const renderList = () => files.map((f, idx) => `
+    <span class="file-chip"><a href="${esc(f.url)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;">📎 ${esc(f.name)}</a>
+      <span class="file-chip-x" onclick="removeFileEntry(${itemId},${columnId},${idx})">✕</span></span>`).join('');
+  picker.innerHTML = `
+    <div class="files-picker-list">${renderList()}</div>
+    <div class="files-picker-row"><input id="fileNameInput" placeholder="Name"/></div>
+    <div class="files-picker-row">
+      <input id="fileUrlInput" placeholder="https://…"/>
+      <button onclick="addFileEntry(${itemId},${columnId})" style="border:none;background:var(--accent-blue);color:#fff;border-radius:6px;padding:0 10px;cursor:pointer;">+</button>
+    </div>`;
+  evt.currentTarget.appendChild(picker);
+}
+function addFileEntry(itemId, columnId){
+  const name = document.getElementById('fileNameInput').value.trim();
+  const url = document.getElementById('fileUrlInput').value.trim();
+  if (!name || !url) return;
+  const item = STATE.items.find(i => i.id === itemId);
+  const files = ((item.values[columnId] || {}).files || []).concat([{name, url}]);
+  saveValue(itemId, columnId, {files});
+  closePicker();
+  render();
+}
+function removeFileEntry(itemId, columnId, idx){
+  const item = STATE.items.find(i => i.id === itemId);
+  const files = ((item.values[columnId] || {}).files || []).slice();
+  files.splice(idx, 1);
+  saveValue(itemId, columnId, {files});
+  closePicker();
+  render();
+}
+
+// ── Item card (expanded item detail: fields + Updates thread) ───────────
 
 async function openUpdates(itemId){
+  const item = STATE.items.find(i => i.id === itemId);
   const panel = document.getElementById('updatesPanel');
   panel.dataset.itemId = itemId;
   panel.style.display = 'flex';
   panel.style.flexDirection = 'column';
   panel.innerHTML = `
     <div class="updates-hdr">
-      <b>Updates</b>
-      <span style="cursor:pointer;color:#9699a6;" onclick="closeUpdates()">✕</span>
+      <span class="item-card-name" contenteditable="true"
+            onblur="saveItemName(${itemId}, this)"
+            onkeydown="if(event.key==='Enter'){event.preventDefault(); this.blur();}">${esc(item.name)}</span>
+      <span style="cursor:pointer;color:var(--text-faint);" onclick="closeUpdates()">✕</span>
     </div>
-    <div class="updates-list" id="updatesList"><div style="color:#9699a6;font-size:12px;">Loading…</div></div>
+    <div class="item-card-fields">
+      ${STATE.columns.map(c => `
+        <div class="item-card-field-row">
+          <div class="item-card-field-label">${esc(c.name)}</div>
+          <div class="item-card-field-value">${renderCell(item, c)}</div>
+        </div>`).join('')}
+    </div>
+    <div class="item-card-divider"></div>
+    <div class="updates-list" id="updatesList" style="flex:1;"><div style="color:var(--text-faint);font-size:12px;">Loading…</div></div>
     <div class="updates-input-row">
       <textarea id="newUpdateBody" placeholder="Write an update…"></textarea>
       <button class="btn-primary" onclick="postUpdate(${itemId})">Post</button>
@@ -427,7 +935,7 @@ async function openUpdates(itemId){
   const r = await fetch(`/api/items/${itemId}/updates`);
   const updates = await r.json();
   const list = document.getElementById('updatesList');
-  list.innerHTML = updates.length ? '' : '<div style="color:#9699a6;font-size:12px;">No updates yet.</div>';
+  list.innerHTML = updates.length ? '' : '<div style="color:var(--text-faint);font-size:12px;">No updates yet.</div>';
   updates.forEach(u => appendUpdateToPanel(Object.assign({}, u, {user: ALL_USERS.find(x => x.id === u.user_id)})));
 }
 function closeUpdates(){

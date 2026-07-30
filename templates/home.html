@@ -4,17 +4,26 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>AJD Work</title>
+<link rel="icon" href="/static/img/logo.png"/>
 <link rel="stylesheet" href="/static/css/app.css"/>
 </head>
 <body>
 {% include "_sidebar.html" %}
 <div class="main">
-  <div class="topbar">
-    <div class="topbar-title">My Boards</div>
-    <div class="user-chip" style="background:{{ user.color }};">{{ user.name[0]|upper }}</div>
-  </div>
+  {% include "_topbar.html" %}
   <div class="page-body">
+    <div class="page-section-hdr">My Boards</div>
     <div class="board-grid" id="boardGrid"></div>
+
+    <div id="favoritesSection" style="display:none;">
+      <div class="page-section-hdr" style="margin-top:32px;">⭐ Favorites</div>
+      <div class="board-grid" id="favoritesGrid"></div>
+    </div>
+
+    <div class="page-section-hdr archived-toggle" onclick="toggleArchivedSection()" style="margin-top:32px;">
+      <span id="archivedArrow">▸</span> Archived Boards
+    </div>
+    <div class="board-grid" id="archivedGrid" style="display:none;"></div>
   </div>
 </div>
 
@@ -29,27 +38,127 @@
   </div>
 </div>
 
+<script src="/static/js/common.js"></script>
 <script>
 const USER = {{ user|tojson }};
+let ALL_BOARDS = [];
+
+function boardCardHtml(b){
+  return `
+    <div class="board-card" data-board-id="${b.id}">
+      <div class="board-card-top">
+        <button class="star-toggle ${b.starred ? 'starred' : ''}" onclick="toggleStar(event, ${b.id})" title="Favorite">★</button>
+        <button class="icon-btn-sm" onclick="openBoardCardMenu(event, ${b.id})">⋮</button>
+      </div>
+      <a class="board-card-link" href="/board/${b.id}">
+        <div class="board-card-icon">${b.icon}</div>
+        <div class="board-card-name">${esc_(b.name)}</div>
+        <div class="board-card-sub">${b.description ? esc_(b.description) : 'No description'}</div>
+      </a>
+    </div>`;
+}
 
 async function loadBoards(){
   const r = await fetch('/api/boards');
-  const boards = await r.json();
+  ALL_BOARDS = await r.json();
   const grid = document.getElementById('boardGrid');
-  if (!boards.length) {
-    grid.innerHTML = `<div class="empty-state">No boards yet — create your first one.</div>`;
-    return;
+  const favGrid = document.getElementById('favoritesGrid');
+  const favSection = document.getElementById('favoritesSection');
+  const starred = ALL_BOARDS.filter(b => b.starred);
+  const rest = ALL_BOARDS.filter(b => !b.starred);
+
+  if (starred.length) {
+    favSection.style.display = 'block';
+    favGrid.innerHTML = starred.map(boardCardHtml).join('');
+  } else {
+    favSection.style.display = 'none';
   }
-  grid.innerHTML = boards.map(b => `
-    <a class="board-card" href="/board/${b.id}">
-      <div class="board-card-icon">${b.icon}</div>
-      <div class="board-card-name">${esc(b.name)}</div>
-      <div class="board-card-sub">${b.description ? esc(b.description) : 'No description'}</div>
-    </a>
-  `).join('');
+
+  if (!rest.length && !starred.length) {
+    grid.innerHTML = `<div class="empty-state">No boards yet — create your first one.</div>`;
+  } else if (!rest.length) {
+    grid.innerHTML = `<div class="empty-state">All boards are favorited — see above.</div>`;
+  } else {
+    grid.innerHTML = rest.map(boardCardHtml).join('');
+  }
 }
 
-function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+async function toggleStar(evt, boardId){
+  evt.preventDefault(); evt.stopPropagation();
+  const board = ALL_BOARDS.find(b => b.id === boardId);
+  await fetch(`/api/boards/${boardId}`, {
+    method: 'PATCH', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({starred: !board.starred})
+  });
+  loadBoards();
+}
+
+function closeMenus(){ document.querySelectorAll('.menu').forEach(m => m.remove()); }
+document.addEventListener('click', (e) => { if (!e.target.closest('.menu') && !e.target.closest('.icon-btn-sm')) closeMenus(); });
+
+function openBoardCardMenu(evt, boardId){
+  evt.preventDefault(); evt.stopPropagation();
+  closeMenus();
+  const board = ALL_BOARDS.find(b => b.id === boardId);
+  const menu = document.createElement('div');
+  menu.className = 'menu';
+  menu.style.top = '30px'; menu.style.right = '8px';
+  menu.innerHTML = `
+    <div class="menu-item" onclick="duplicateBoard(${boardId})">⎘ Duplicate</div>
+    <div class="menu-item" onclick="archiveBoard(${boardId}, ${!board.archived})">🗄 ${board.archived ? 'Restore' : 'Archive'}</div>
+    <div class="menu-sep"></div>
+    <div class="menu-item danger" onclick="deleteBoard(${boardId})">🗑 Delete</div>`;
+  evt.currentTarget.parentElement.appendChild(menu);
+}
+async function duplicateBoard(boardId){
+  closeMenus();
+  const r = await fetch(`/api/boards/${boardId}/duplicate`, {method: 'POST'});
+  const board = await r.json();
+  window.location.href = '/board/' + board.id;
+}
+async function archiveBoard(boardId, archived){
+  closeMenus();
+  await fetch(`/api/boards/${boardId}`, {
+    method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({archived})
+  });
+  loadBoards();
+  loadArchivedBoards();
+}
+async function deleteBoard(boardId){
+  closeMenus();
+  if (!confirmDelete) return;
+  await fetch(`/api/boards/${boardId}`, {method: 'DELETE'});
+  loadBoards();
+  loadArchivedBoards();
+}
+let confirmDelete = false;
+document.addEventListener('DOMContentLoaded', () => { confirmDelete = true; }); // simple guard placeholder
+
+let archivedLoaded = false;
+async function toggleArchivedSection(){
+  const grid = document.getElementById('archivedGrid');
+  const arrow = document.getElementById('archivedArrow');
+  const showing = grid.style.display !== 'none';
+  grid.style.display = showing ? 'none' : 'grid';
+  arrow.textContent = showing ? '▸' : '▾';
+  if (!showing && !archivedLoaded) { archivedLoaded = true; await loadArchivedBoards(); }
+}
+async function loadArchivedBoards(){
+  const r = await fetch('/api/boards?archived=1');
+  const boards = await r.json();
+  const grid = document.getElementById('archivedGrid');
+  grid.innerHTML = boards.length
+    ? boards.map(b => `
+      <div class="board-card" data-board-id="${b.id}" style="opacity:.7;">
+        <div class="board-card-top">
+          <button class="icon-btn-sm" onclick="archiveBoard(${b.id}, false)" title="Restore">↺</button>
+        </div>
+        <div class="board-card-icon">${b.icon}</div>
+        <div class="board-card-name">${esc_(b.name)}</div>
+        <div class="board-card-sub">Archived</div>
+      </div>`).join('')
+    : `<div class="empty-state">No archived boards.</div>`;
+}
 
 function openNewBoardModal(){
   document.getElementById('newBoardModal').style.display = 'flex';
