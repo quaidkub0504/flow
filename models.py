@@ -249,11 +249,14 @@ class Column(db.Model):
 
 
 class Item(db.Model):
-    """A single row on a board."""
+    """A single row on a board — or a subitem, when parent_id is set (a
+    subitem is just an Item whose parent is another Item, matching
+    monday.com's own simplified subitem model)."""
     __tablename__ = "items"
     id = db.Column(db.Integer, primary_key=True)
     board_id = db.Column(db.Integer, db.ForeignKey("boards.id"), nullable=False)
     group_id = db.Column(db.Integer, db.ForeignKey("groups.id"), nullable=False)
+    parent_id = db.Column(db.Integer, db.ForeignKey("items.id"), nullable=True)
     name = db.Column(db.String(500), nullable=False)
     position = db.Column(db.Integer, nullable=False, default=0)
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
@@ -261,10 +264,12 @@ class Item(db.Model):
 
     values = db.relationship("ColumnValue", backref="item", cascade="all, delete-orphan")
     updates = db.relationship("Update", backref="item", order_by="Update.created_at", cascade="all, delete-orphan")
+    children = db.relationship("Item", backref=db.backref("parent", remote_side=[id]),
+                                cascade="all, delete-orphan")
 
     def to_dict(self):
         return {
-            "id": self.id, "board_id": self.board_id, "group_id": self.group_id,
+            "id": self.id, "board_id": self.board_id, "group_id": self.group_id, "parent_id": self.parent_id,
             "name": self.name, "position": self.position,
             "values": {v.column_id: v.value for v in self.values},
         }

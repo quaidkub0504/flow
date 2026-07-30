@@ -50,6 +50,19 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="resetPasswordModal" style="display:none;">
+  <div class="modal">
+    <div class="modal-hdr">Reset Password</div>
+    <div id="resetPasswordFor" style="font-size:12px;color:var(--text-dim);margin-bottom:10px;"></div>
+    <input id="resetPasswordValue" type="password" placeholder="New temporary password (8+ characters)"/>
+    <div id="resetPasswordStatus" style="font-size:12px;color:#ff6b81;margin-bottom:6px;"></div>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeResetPasswordModal()">Cancel</button>
+      <button class="btn-primary" onclick="submitResetPassword()">Set Password</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="confirmModal" style="display:none;">
   <div class="modal">
     <div class="modal-hdr" id="confirmModalHdr">Are you sure?</div>
@@ -87,6 +100,7 @@ async function loadTeam(){
             </td>
             <td style="padding:9px 12px;white-space:nowrap;">
               ${u.id===USER.id ? `<span style="color:var(--accent-blue);cursor:pointer;font-size:13px;" onclick="openEditProfileModal()">✎ Edit</span>` : ''}
+              ${(me && me.is_admin && u.id!==USER.id) ? `<span style="color:var(--accent-blue);cursor:pointer;font-size:13px;margin-left:12px;" onclick="openResetPasswordModal(${u.id})">🔑 Reset</span>` : ''}
               ${(me && me.is_admin && u.id!==USER.id) ? `<span style="color:#ff6b81;cursor:pointer;font-size:13px;margin-left:12px;" onclick="removeTeammate(${u.id})">🗑 Remove</span>` : ''}
             </td>
           </tr>`).join('')}
@@ -137,6 +151,26 @@ async function submitEditProfile(){
   if (!r.ok) { document.getElementById('editStatus').textContent = data.error || 'Failed to save.'; return; }
   closeEditProfileModal();
   await loadTeam();
+}
+
+let RESET_PASSWORD_USER_ID = null;
+function openResetPasswordModal(userId){
+  const u = TEAM.find(x => x.id === userId);
+  RESET_PASSWORD_USER_ID = userId;
+  document.getElementById('resetPasswordFor').textContent = `Setting a new password for ${u.name} — share it with them directly.`;
+  document.getElementById('resetPasswordValue').value = '';
+  document.getElementById('resetPasswordStatus').textContent = '';
+  document.getElementById('resetPasswordModal').style.display = 'flex';
+}
+function closeResetPasswordModal(){ document.getElementById('resetPasswordModal').style.display = 'none'; }
+async function submitResetPassword(){
+  const password = document.getElementById('resetPasswordValue').value;
+  const r = await fetch(`/api/users/${RESET_PASSWORD_USER_ID}`, {
+    method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({password})
+  });
+  const data = await r.json();
+  if (!r.ok) { document.getElementById('resetPasswordStatus').textContent = data.error || 'Failed to reset password.'; return; }
+  closeResetPasswordModal();
 }
 
 function removeTeammate(userId){

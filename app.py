@@ -68,11 +68,14 @@ def _migrate_schema():
     an existing dev/production database that predates them."""
     insp = inspect(db.engine)
     existing_board_cols = {c["name"] for c in insp.get_columns("boards")}
+    existing_item_cols = {c["name"] for c in insp.get_columns("items")}
     with db.engine.begin() as conn:
         if "folder_id" not in existing_board_cols:
             conn.execute(text("ALTER TABLE boards ADD COLUMN folder_id INTEGER"))
         if "starred" not in existing_board_cols:
             conn.execute(text("ALTER TABLE boards ADD COLUMN starred BOOLEAN DEFAULT 0"))
+        if "parent_id" not in existing_item_cols:
+            conn.execute(text("ALTER TABLE items ADD COLUMN parent_id INTEGER"))
     db.create_all()  # picks up brand-new tables (folders, views)
 
     # Backfill a default "Main table" view for any board that predates the
@@ -815,9 +818,9 @@ def api_item(item_id):
 def api_duplicate_item(item_id):
     item = Item.query.get_or_404(item_id)
     user = current_user()
-    position = Item.query.filter_by(group_id=item.group_id).count()
-    dup = Item(board_id=item.board_id, group_id=item.group_id, name=f"{item.name} (copy)",
-               position=position, created_by=user.id)
+    position = Item.query.filter_by(group_id=item.group_id, parent_id=item.parent_id).count()
+    dup = Item(board_id=item.board_id, group_id=item.group_id, parent_id=item.parent_id,
+               name=f"{item.name} (copy)", position=position, created_by=user.id)
     db.session.add(dup)
     db.session.flush()
     for cv in item.values:
@@ -826,6 +829,22 @@ def api_duplicate_item(item_id):
     db.session.commit()
     payload = dup.to_dict()
     socketio.emit("item_created", payload, room=f"board_{item.board_id}")
+    return jsonify(payload)
+
+
+@app.route("/api/items/<int:item_id>/subitems", methods=["POST"])
+def api_create_subitem(item_id):
+    parent = Item.query.get_or_404(item_id)
+    data = request.get_json(force=True)
+    user = current_user()
+    position = Item.query.filter_by(parent_id=parent.id).count()
+    child = Item(board_id=parent.board_id, group_id=parent.group_id, parent_id=parent.id,
+                 name=data.get("name") or "Subitem", position=position, created_by=user.id)
+    db.session.add(child)
+    db.session.add(ActivityLog(board_id=parent.board_id, user_id=user.id, action="created_item", detail=child.name))
+    db.session.commit()
+    payload = child.to_dict()
+    socketio.emit("item_created", payload, room=f"board_{parent.board_id}")
     return jsonify(payload)
 
 
@@ -881,9 +900,9 @@ def api_bulk_duplicate_items():
         if not item:
             continue
         board_id = item.board_id
-        position = Item.query.filter_by(group_id=item.group_id).count()
-        dup = Item(board_id=item.board_id, group_id=item.group_id, name=f"{item.name} (copy)",
-                   position=position, created_by=user.id)
+        position = Item.query.filter_by(group_id=item.group_id, parent_id=item.parent_id).count()
+        dup = Item(board_id=item.board_id, group_id=item.group_id, parent_id=item.parent_id,
+                   name=f"{item.name} (copy)", position=position, created_by=user.id)
         db.session.add(dup)
         db.session.flush()
         for cv in item.values:

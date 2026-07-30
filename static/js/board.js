@@ -12,6 +12,7 @@ let DRAG_ITEM_ID = null;
 let DRAG_GROUP_ID = null;
 const GROUP_COLORS = ["#579bfc","#00c875","#fdab3d","#e2445c","#a25ddc","#66ccff","#ff642e","#037f4c"];
 let CALENDAR_VIEW_DATE = new Date();
+let EXPANDED_ITEMS = new Set();
 
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -218,9 +219,16 @@ function applySort(items){
   });
 }
 function itemsForGroup(groupId){
-  let items = STATE.items.filter(i => i.group_id === groupId);
+  let items = STATE.items.filter(i => i.group_id === groupId && !i.parent_id);
   items = applyFilterSearch(items);
   return applySort(items);
+}
+function childrenOf(itemId){
+  return STATE.items.filter(i => i.parent_id === itemId).sort((a,b) => a.position - b.position);
+}
+function toggleExpandItem(itemId){
+  if (EXPANDED_ITEMS.has(itemId)) EXPANDED_ITEMS.delete(itemId); else EXPANDED_ITEMS.add(itemId);
+  render();
 }
 
 // ── View dispatch ─────────────────────────────────────────────────────────
@@ -278,6 +286,7 @@ function renderTable(group, items){
       <thead><tr>
         <th class="select-cell"><input type="checkbox" ${allSelected?'checked':''} onclick="toggleSelectAllInGroup(${group.id})"/></th>
         <th style="width:22px;"></th>
+        <th style="width:20px;"></th>
         <th style="min-width:240px;">Item</th>
         ${cols.map(c => `
           <th style="width:${c.width}px;">
@@ -289,9 +298,11 @@ function renderTable(group, items){
         <th style="width:36px;"><span class="add-col-btn" onclick="openNewColumnModal()">+</span></th>
       </tr></thead>
       <tbody>
-        ${items.map(item => renderRow(group, item)).join('')}
+        ${items.map(item => renderRow(group, item) +
+          (EXPANDED_ITEMS.has(item.id) ? childrenOf(item.id).map(child => renderSubitemRow(group, child)).join('') : '')
+        ).join('')}
         <tr class="add-item-row">
-          <td colspan="${cols.length + 4}" style="border-left:4px solid ${group.color};">
+          <td colspan="${cols.length + 5}" style="border-left:4px solid ${group.color};">
             <input class="add-item-input" placeholder="+ Add item"
                    onkeydown="if(event.key==='Enter'){addItem(${group.id}, this);}"/>
           </td>
@@ -307,7 +318,7 @@ function renderFooterRow(items, cols){
     : null);
   if (!sums.some(s => s !== null)) return '';
   return `<tr class="footer-row">
-    <td class="footer-label" colspan="3">Sum</td>
+    <td class="footer-label" colspan="4">Sum</td>
     ${cols.map((c,idx) => `<td>${sums[idx] !== null ? `<span class="footer-sum">${sums[idx]}</span>` : ''}</td>`).join('')}
     <td></td>
   </tr>`;
@@ -317,18 +328,37 @@ function renderRow(group, item){
   const cols = visibleColumns();
   const draggable = !SORT_STATE.columnId;
   const selected = SELECTED_ITEMS.has(item.id);
+  const kids = childrenOf(item.id);
+  const expanded = EXPANDED_ITEMS.has(item.id);
   return `
     <tr data-item-id="${item.id}" class="${selected?'row-selected':''}"
         ondragover="onRowDragOver(event)" ondragleave="onRowDragLeave(event)"
         ondrop="onRowDrop(event, ${group.id}, ${item.id})">
       <td class="select-cell"><input type="checkbox" ${selected?'checked':''} onclick="toggleSelectItem(${item.id})"/></td>
       <td class="drag-handle-cell">${draggable ? `<span class="drag-handle" draggable="true" ondragstart="onRowDragStart(event, ${item.id})" ondragend="onRowDragEnd(event)">⠿</span>` : ''}</td>
+      <td class="expand-cell">${kids.length ? `<span class="subitem-toggle" onclick="toggleExpandItem(${item.id})">${expanded?'▾':'▸'}<span class="subitem-count">${kids.length}</span></span>` : ''}</td>
       <td class="item-name-cell" style="--gcolor:${group.color};" contenteditable="true"
           onblur="saveItemName(${item.id}, this)"
           onkeydown="if(event.key==='Enter'){event.preventDefault(); this.blur();}"
           ondblclick="openUpdates(${item.id})">${esc(item.name)}</td>
       ${cols.map(col => `<td>${renderCell(item, col)}</td>`).join('')}
       <td><div class="row-menu-btn" onclick="openRowMenu(event, ${item.id})">⋮</div></td>
+    </tr>`;
+}
+
+function renderSubitemRow(group, child){
+  const cols = visibleColumns();
+  return `
+    <tr data-item-id="${child.id}" class="subitem-row">
+      <td class="select-cell"></td>
+      <td class="drag-handle-cell"></td>
+      <td class="expand-cell"></td>
+      <td class="item-name-cell subitem-name-cell" style="--gcolor:${group.color};" contenteditable="true"
+          onblur="saveItemName(${child.id}, this)"
+          onkeydown="if(event.key==='Enter'){event.preventDefault(); this.blur();}"
+          ondblclick="openUpdates(${child.id})">${esc(child.name)}</td>
+      ${cols.map(col => `<td>${renderCell(child, col)}</td>`).join('')}
+      <td><div class="row-menu-btn" onclick="openRowMenu(event, ${child.id})">⋮</div></td>
     </tr>`;
 }
 
@@ -441,7 +471,7 @@ function renderKanbanView(){
     return;
   }
   const labels = statusCol.settings.labels || [];
-  const items = applyFilterSearch(STATE.items.slice());
+  const items = applyFilterSearch(STATE.items.filter(i => !i.parent_id));
   const buckets = labels.map(l => ({label: l, items: items.filter(i => (i.values[statusCol.id]||{}).label_id === l.id)}));
   const noStatus = items.filter(i => !(i.values[statusCol.id]||{}).label_id);
   const allBuckets = buckets.concat([{label: {id: null, text: 'No Status', color: '#9295ac'}, items: noStatus}]);
@@ -500,7 +530,7 @@ function renderCalendarView(){
   const monthLabel = new Date(year, month, 1).toLocaleDateString('en-US', {month:'long', year:'numeric'});
   const todayStr = new Date().toISOString().slice(0, 10);
 
-  const items = applyFilterSearch(STATE.items.slice()).filter(i => (i.values[dateCol.id] || {}).date);
+  const items = applyFilterSearch(STATE.items.filter(i => !i.parent_id)).filter(i => (i.values[dateCol.id] || {}).date);
   const itemsByDate = {};
   items.forEach(i => {
     const d = i.values[dateCol.id].date;
@@ -573,7 +603,7 @@ function renderDashboardView(){
   const priorityCol = STATE.columns.find(c => c.type === 'priority');
   const personCol = STATE.columns.find(c => c.type === 'person');
   const numberCols = STATE.columns.filter(c => c.type === 'number' || c.type === 'progress');
-  const items = STATE.items;
+  const items = STATE.items.filter(i => !i.parent_id);
 
   const kpis = [`<div class="dash-kpi"><div class="dash-kpi-num">${items.length}</div><div class="dash-kpi-label">Total Items</div></div>`]
     .concat(numberCols.map(c => {
@@ -970,12 +1000,25 @@ function confirmDeleteColumn(colId){
 // ── Row menu ──────────────────────────────────────────────────────────────
 
 function openRowMenu(evt, itemId){
+  const item = STATE.items.find(i => i.id === itemId);
+  const isSubitem = !!(item && item.parent_id);
   openMenuAt(evt, `
     <div class="menu-item" onclick="closeAllMenus();openUpdates(${itemId})">⤢ Open</div>
+    ${!isSubitem ? `<div class="menu-item" onclick="addSubitem(${itemId})">➕ Add subitem</div>` : ''}
     <div class="menu-item" onclick="duplicateItemRow(${itemId})">⎘ Duplicate</div>
     <div class="menu-sep"></div>
     <div class="menu-item danger" onclick="confirmDeleteItem(${itemId})">🗑 Delete</div>
   `);
+}
+async function addSubitem(parentId){
+  closeAllMenus();
+  const r = await fetch(`/api/items/${parentId}/subitems`, {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name: 'Subitem'})
+  });
+  const child = await r.json();
+  if (!STATE.items.find(i => i.id === child.id)) STATE.items.push(child);
+  EXPANDED_ITEMS.add(parentId);
+  render();
 }
 async function duplicateItemRow(itemId){
   closeAllMenus();
@@ -984,10 +1027,12 @@ async function duplicateItemRow(itemId){
 function confirmDeleteItem(itemId){
   closeAllMenus();
   const item = STATE.items.find(i => i.id === itemId);
-  STATE.items = STATE.items.filter(i => i.id !== itemId);
+  const kids = childrenOf(itemId);  // deleting an item cascades to its subitems server-side too
+  const removedIds = new Set([itemId, ...kids.map(k => k.id)]);
+  STATE.items = STATE.items.filter(i => !removedIds.has(i.id));
   render();
   showUndoToast(`Deleted "${item.name}"`, () => {
-    STATE.items.push(item);
+    STATE.items.push(item, ...kids);
     render();
   }, async () => {
     await fetch(`/api/items/${itemId}`, {method: 'DELETE'});

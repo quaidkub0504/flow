@@ -115,6 +115,14 @@ tr.drag-over-row{box-shadow:inset 0 2px 0 var(--accent-blue);}
   border-bottom:1px solid var(--border);font-size:13px;color:var(--text);}
 .bulk-action-bar b{color:var(--text);}
 
+.expand-cell{width:20px;text-align:center;}
+.subitem-toggle{cursor:pointer;color:var(--text-dim);font-size:10px;display:inline-flex;align-items:center;gap:2px;
+  user-select:none;}
+.subitem-toggle:hover{color:var(--text);}
+.subitem-count{font-size:10px;font-weight:700;}
+tr.subitem-row td{background:var(--bg-app);}
+.subitem-name-cell{padding-left:30px!important;font-size:12.5px;color:var(--text-dim);}
+
 .rating-cell{gap:2px;cursor:default;}
 .rating-star{font-size:15px;color:var(--pill-empty);cursor:pointer;}
 .rating-star.lit{color:#fdab3d;}
