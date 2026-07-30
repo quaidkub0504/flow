@@ -100,7 +100,13 @@ def current_user():
 def require_login():
     if request.path.startswith("/static/") or request.path in ("/login", "/logout", "/api/login", "/setup", "/api/setup"):
         return
-    if not session.get("user_id"):
+    uid = session.get("user_id")
+    # Also reject a session pointing at a user that no longer exists — e.g. an
+    # admin removed this person as a teammate while they were still logged in
+    # elsewhere. Without this check they'd hit a 500 (current_user() -> None)
+    # on their very next request instead of a clean redirect to login.
+    if not uid or not User.query.get(uid):
+        session.clear()
         if request.accept_mimetypes.accept_html and not request.path.startswith("/api/"):
             return redirect("/login")
         return jsonify({"error": "Not authenticated"}), 401
@@ -177,6 +183,11 @@ def my_work_page():
     return render_template("my_work.html", user=current_user().to_dict())
 
 
+@app.route("/team")
+def team_page():
+    return render_template("team.html", user=current_user().to_dict())
+
+
 @app.route("/api/my_work")
 def api_my_work():
     """Everything assigned to the current user (via any Person column),
@@ -209,9 +220,60 @@ def api_my_work():
 
 # ── Board / item / column APIs ──────────────────────────────────────────
 
-@app.route("/api/users")
+@app.route("/api/users", methods=["GET", "POST"])
 def api_users():
-    return jsonify([u.to_dict() for u in User.query.all()])
+    if request.method == "GET":
+        return jsonify([u.to_dict() for u in User.query.all()])
+
+    user = current_user()
+    if not user.is_admin:
+        return jsonify({"error": "Only admins can add teammates"}), 403
+    data = request.get_json(force=True)
+    name = (data.get("name") or "").strip()
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
+    if not name or not email or len(password) < 8:
+        return jsonify({"error": "Name, email, and an 8+ character password are required"}), 400
+    if User.query.filter_by(email=email).first():
+        return jsonify({"error": "That email is already in use"}), 400
+    color = GROUP_COLOR_ROTATION[User.query.count() % len(GROUP_COLOR_ROTATION)]
+    new_user = User(name=name, email=email, is_admin=bool(data.get("is_admin")), color=color)
+    new_user.set_password(password)
+    db.session.add(new_user)
+    db.session.commit()
+    return jsonify(new_user.to_dict())
+
+
+@app.route("/api/users/<int:user_id>", methods=["PATCH", "DELETE"])
+def api_user_detail(user_id):
+    user = current_user()
+    target = User.query.get_or_404(user_id)
+    is_self = target.id == user.id
+
+    if request.method == "DELETE":
+        if not user.is_admin:
+            return jsonify({"error": "Only admins can remove teammates"}), 403
+        if is_self:
+            return jsonify({"error": "You can't remove your own account"}), 400
+        db.session.delete(target)
+        db.session.commit()
+        return jsonify({"success": True})
+
+    if not is_self and not user.is_admin:
+        return jsonify({"error": "Not authorized"}), 403
+    data = request.get_json(force=True)
+    if "name" in data and data["name"].strip():
+        target.name = data["name"].strip()
+    if "color" in data:
+        target.color = data["color"]
+    if "password" in data and data["password"]:
+        if len(data["password"]) < 8:
+            return jsonify({"error": "Password must be at least 8 characters"}), 400
+        target.set_password(data["password"])
+    if "is_admin" in data and user.is_admin and not is_self:
+        target.is_admin = bool(data["is_admin"])
+    db.session.commit()
+    return jsonify(target.to_dict())
 
 
 @app.route("/api/boards", methods=["GET", "POST"])

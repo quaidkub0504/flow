@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Team — AJD Work</title>
+<link rel="icon" href="/static/img/logo.png"/>
+<link rel="stylesheet" href="/static/css/app.css"/>
+</head>
+<body>
+{% include "_sidebar.html" %}
+<div class="main">
+  {% include "_topbar.html" %}
+  <div class="page-body">
+    <div class="page-section-hdr" style="display:flex;align-items:center;justify-content:space-between;">
+      <span>👥 Team</span>
+      <button class="btn-new-item" id="inviteBtn" style="display:none;" onclick="openInviteModal()">+ Invite teammate</button>
+    </div>
+    <div id="teamList"></div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="inviteModal" style="display:none;">
+  <div class="modal">
+    <div class="modal-hdr">Invite Teammate</div>
+    <input id="inviteName" placeholder="Full name"/>
+    <input id="inviteEmail" type="email" placeholder="Email"/>
+    <input id="invitePassword" type="password" placeholder="Temporary password (8+ characters)"/>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-dim);margin:2px 0 12px;">
+      <input type="checkbox" id="inviteIsAdmin" style="width:auto;"/> Admin (can manage the team)
+    </label>
+    <div id="inviteStatus" style="font-size:12px;color:#ff6b81;margin-bottom:6px;"></div>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeInviteModal()">Cancel</button>
+      <button class="btn-primary" onclick="submitInvite()">Add</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="editProfileModal" style="display:none;">
+  <div class="modal">
+    <div class="modal-hdr">Edit Profile</div>
+    <input id="editName" placeholder="Full name"/>
+    <input id="editPassword" type="password" placeholder="New password (leave blank to keep current)"/>
+    <div id="editStatus" style="font-size:12px;color:#ff6b81;margin-bottom:6px;"></div>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeEditProfileModal()">Cancel</button>
+      <button class="btn-primary" onclick="submitEditProfile()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="confirmModal" style="display:none;">
+  <div class="modal">
+    <div class="modal-hdr" id="confirmModalHdr">Are you sure?</div>
+    <div id="confirmModalBody" style="font-size:13px;color:var(--text-dim);margin-bottom:6px;"></div>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeConfirmModal()">Cancel</button>
+      <button class="btn-primary" id="confirmModalOkBtn" style="background:#e2445c;">Delete</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/common.js"></script>
+<script>
+const USER = {{ user|tojson }};
+let TEAM = [];
+
+async function loadTeam(){
+  TEAM = await fetch('/api/users').then(r => r.json());
+  const me = TEAM.find(u => u.id === USER.id);
+  document.getElementById('inviteBtn').style.display = (me && me.is_admin) ? 'inline-block' : 'none';
+  const list = document.getElementById('teamList');
+  list.innerHTML = `
+    <table class="board-table" style="width:100%;">
+      <thead><tr><th style="min-width:220px;">Name</th><th>Email</th><th>Role</th><th style="width:160px;"></th></tr></thead>
+      <tbody>
+        ${TEAM.map(u => `
+          <tr>
+            <td class="item-name-cell" style="border-left:none;display:flex;align-items:center;gap:10px;">
+              <div class="avatar" style="background:${u.color};margin-left:0;">${esc_(u.name[0].toUpperCase())}</div>
+              ${esc_(u.name)}${u.id===USER.id ? ' (you)' : ''}
+            </td>
+            <td style="padding:9px 12px;color:var(--text-dim);">${esc_(u.email)}</td>
+            <td style="padding:9px 12px;">
+              ${u.is_admin ? '<span class="pill" style="background:#a25ddc;display:inline-block;width:auto;padding:0 10px;">Admin</span>' : ''}
+            </td>
+            <td style="padding:9px 12px;white-space:nowrap;">
+              ${u.id===USER.id ? `<span style="color:var(--accent-blue);cursor:pointer;font-size:13px;" onclick="openEditProfileModal()">✎ Edit</span>` : ''}
+              ${(me && me.is_admin && u.id!==USER.id) ? `<span style="color:#ff6b81;cursor:pointer;font-size:13px;margin-left:12px;" onclick="removeTeammate(${u.id})">🗑 Remove</span>` : ''}
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function openInviteModal(){
+  document.getElementById('inviteModal').style.display = 'flex';
+  document.getElementById('inviteStatus').textContent = '';
+}
+function closeInviteModal(){
+  document.getElementById('inviteModal').style.display = 'none';
+  ['inviteName','inviteEmail','invitePassword'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('inviteIsAdmin').checked = false;
+}
+async function submitInvite(){
+  const name = document.getElementById('inviteName').value.trim();
+  const email = document.getElementById('inviteEmail').value.trim();
+  const password = document.getElementById('invitePassword').value;
+  const is_admin = document.getElementById('inviteIsAdmin').checked;
+  const r = await fetch('/api/users', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name, email, password, is_admin})
+  });
+  const data = await r.json();
+  if (!r.ok) { document.getElementById('inviteStatus').textContent = data.error || 'Failed to add teammate.'; return; }
+  closeInviteModal();
+  await loadTeam();
+}
+
+function openEditProfileModal(){
+  const me = TEAM.find(u => u.id === USER.id);
+  document.getElementById('editName').value = me.name;
+  document.getElementById('editPassword').value = '';
+  document.getElementById('editStatus').textContent = '';
+  document.getElementById('editProfileModal').style.display = 'flex';
+}
+function closeEditProfileModal(){ document.getElementById('editProfileModal').style.display = 'none'; }
+async function submitEditProfile(){
+  const name = document.getElementById('editName').value.trim();
+  const password = document.getElementById('editPassword').value;
+  const body = {name};
+  if (password) body.password = password;
+  const r = await fetch(`/api/users/${USER.id}`, {
+    method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  const data = await r.json();
+  if (!r.ok) { document.getElementById('editStatus').textContent = data.error || 'Failed to save.'; return; }
+  closeEditProfileModal();
+  await loadTeam();
+}
+
+function removeTeammate(userId){
+  const u = TEAM.find(x => x.id === userId);
+  confirmAction('Remove teammate', `Remove ${u.name} from the team? They will no longer be able to log in.`, 'Remove', async () => {
+    await fetch(`/api/users/${userId}`, {method: 'DELETE'});
+    await loadTeam();
+  });
+}
+
+loadTeam();
+</script>
+</body>
+</html>

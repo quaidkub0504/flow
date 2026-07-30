@@ -134,7 +134,7 @@ class User(db.Model):
         return check_password_hash(self.password_hash, raw)
 
     def to_dict(self):
-        return {"id": self.id, "name": self.name, "email": self.email, "color": self.color}
+        return {"id": self.id, "name": self.name, "email": self.email, "color": self.color, "is_admin": self.is_admin}
 
 
 class Folder(db.Model):

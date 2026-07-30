@@ -1,8 +1,11 @@
 <div class="sidebar">
   <div class="sidebar-logo"><a href="/"><img src="/static/img/logo.png" alt="AJ Danboise" class="sidebar-logo-img"/></a></div>
   <button class="new-board-btn" onclick="openNewBoardModal()">+ New Board</button>
-  <a href="/my-work" class="sidebar-board-link {{ 'active' if request.path == '/my-work' else '' }}" style="margin-bottom:12px;">
+  <a href="/my-work" class="sidebar-board-link {{ 'active' if request.path == '/my-work' else '' }}">
     <span class="sb-icon">🗂</span>My Work
+  </a>
+  <a href="/team" class="sidebar-board-link {{ 'active' if request.path == '/team' else '' }}" style="margin-bottom:12px;">
+    <span class="sb-icon">👥</span>Team
   </a>
 
   <div id="sidebarFavorites" style="display:none;">
