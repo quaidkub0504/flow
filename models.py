@@ -1,6 +1,6 @@
 # Copyright (c) 2026 AJ Danboise Son Inc. All rights reserved.
 """
-AJD Work — data model.
+Danboise Flow — data model.
 
 Mirrors monday.com's real structure deliberately, since the goal is a
 faithful in-house replacement, not a loose inspiration:

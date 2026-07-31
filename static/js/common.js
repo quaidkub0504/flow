@@ -1,4 +1,4 @@
-// AJD Work — shared across every page: global search, notifications bell.
+// Danboise Flow — shared across every page: global search, notifications bell.
 function timeAgo(iso){
   if (!iso) return '';
   const sec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);

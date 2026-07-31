@@ -1,4 +1,4 @@
-// AJD Work — board rendering (table + kanban views) + real-time sync engine.
+// Danboise Flow — board rendering (table + kanban views) + real-time sync engine.
 let STATE = { board: null, groups: [], columns: [], items: [], views: [], currentViewId: null };
 let ALL_USERS = [];
 let socket = null;
@@ -1051,9 +1051,10 @@ function toggleBoardStar(){
 }
 async function openBoardSettingsMenu(evt){
   evt.stopPropagation();
+  const anchor = evt.currentTarget;
   const folders = await fetch('/api/folders').then(r => r.json());
   const folderItems = folders.map(f => `<div class="menu-item" onclick="moveBoardToFolder(${f.id})">📁 ${esc(f.name)}</div>`).join('');
-  openMenuAt(evt, `
+  openMenuAt({stopPropagation(){}, currentTarget: anchor}, `
     <div class="menu-item" onclick="closeAllMenus(); openAutomationsModal();">⚡ Automations</div>
     <div class="menu-sep"></div>
     <div class="menu-item" onclick="duplicateBoardFromPage()">⎘ Duplicate board</div>
@@ -1382,12 +1383,41 @@ function openFilesPicker(evt, itemId, columnId){
       <span class="file-chip-x" onclick="removeFileEntry(${itemId},${columnId},${idx})">✕</span></span>`).join('');
   picker.innerHTML = `
     <div class="files-picker-list">${renderList()}</div>
-    <div class="files-picker-row"><input id="fileNameInput" placeholder="Name"/></div>
+    <div class="files-picker-row">
+      <button class="files-upload-btn" onclick="document.getElementById('fileUploadInput').click();">⬆ Upload file</button>
+      <input id="fileUploadInput" type="file" style="display:none;" onchange="uploadFileEntry(${itemId},${columnId},this)"/>
+    </div>
+    <div id="fileUploadStatus" style="font-size:11px;color:var(--text-faint);min-height:14px;margin-bottom:4px;"></div>
+    <div class="files-picker-row"><input id="fileNameInput" placeholder="Or attach a link — name"/></div>
     <div class="files-picker-row">
       <input id="fileUrlInput" placeholder="https://…"/>
       <button onclick="addFileEntry(${itemId},${columnId})" style="border:none;background:var(--accent-blue);color:#fff;border-radius:6px;padding:0 10px;cursor:pointer;">+</button>
     </div>`;
   evt.currentTarget.appendChild(picker);
+}
+async function uploadFileEntry(itemId, columnId, inputEl){
+  const file = inputEl.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById('fileUploadStatus');
+  if (file.size > 25 * 1024 * 1024) {
+    if (statusEl) statusEl.textContent = 'File is too large (25MB max).';
+    return;
+  }
+  if (statusEl) statusEl.textContent = `Uploading ${file.name}…`;
+  const body = new FormData();
+  body.append('file', file);
+  try {
+    const r = await fetch('/api/uploads', {method: 'POST', body});
+    if (!r.ok) throw new Error('Upload failed');
+    const uploaded = await r.json();
+    const item = STATE.items.find(i => i.id === itemId);
+    const files = ((item.values[columnId] || {}).files || []).concat([uploaded]);
+    saveValue(itemId, columnId, {files});
+    closePicker();
+    render();
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Upload failed — try again.';
+  }
 }
 function addFileEntry(itemId, columnId){
   const name = document.getElementById('fileNameInput').value.trim();
@@ -1402,8 +1432,11 @@ function addFileEntry(itemId, columnId){
 function removeFileEntry(itemId, columnId, idx){
   const item = STATE.items.find(i => i.id === itemId);
   const files = ((item.values[columnId] || {}).files || []).slice();
-  files.splice(idx, 1);
+  const [removed] = files.splice(idx, 1);
   saveValue(itemId, columnId, {files});
+  if (removed && removed.url && removed.url.startsWith('/uploads/')) {
+    fetch(`/api/uploads${removed.url.slice('/uploads'.length)}`, {method: 'DELETE'});
+  }
   closePicker();
   render();
 }

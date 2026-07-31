@@ -1,4 +1,4 @@
-/* AJD Work — shared app styles. Dark theme matching AJ Danboise's real
+/* Danboise Flow — shared app styles. Dark theme matching AJ Danboise's real
    monday.com dashboard 1:1: near-black navy chrome, a lighter header band
    on tables, monday's own status/priority colors on pills, blue primary
    actions. AJD's own brand touch is kept small and deliberate (the "Work"
@@ -38,7 +38,12 @@ html,body{height:100%;background:var(--bg-app);color:var(--text);}
 .sidebar-board-link.active{background:var(--bg-row-hover);color:var(--text);font-weight:700;
   border-left-color:var(--accent-blue);}
 .sb-icon{font-size:15px;}
-.sidebar-footer{padding:12px 20px 0;border-top:1px solid var(--border-soft);}
+.sidebar-footer{min-height:132px;padding:12px 20px 14px;border-top:1px solid var(--border-soft);
+  display:flex;align-items:flex-end;
+  background-image:linear-gradient(rgba(20,21,31,0.85),rgba(20,21,31,0.85)),url('/static/img/100years.png');
+  background-repeat:no-repeat,no-repeat;
+  background-position:center,center 8px;
+  background-size:cover,150px auto;}
 .sidebar-logout{color:var(--text-faint);font-size:12px;text-decoration:none;}
 .sidebar-logout:hover{color:var(--text);}
 
@@ -322,6 +327,9 @@ tr.footer-row .footer-label{padding:9px 12px;font-size:11px;text-transform:upper
 .files-picker-list .file-chip{cursor:default;}
 .file-chip-x{cursor:pointer;font-weight:800;opacity:.7;}
 .file-chip-x:hover{opacity:1;}
+.files-upload-btn{width:100%;border:1px dashed var(--border);background:var(--bg-app);color:var(--text);
+  border-radius:6px;padding:7px 8px;font-size:12px;font-weight:700;cursor:pointer;}
+.files-upload-btn:hover{border-color:var(--accent-blue);color:var(--accent-blue);}
 
 /* ── Kanban view ───────────────────────────────────────────────────────── */
 .kanban-board{display:flex;gap:16px;align-items:flex-start;overflow-x:auto;padding-bottom:20px;}

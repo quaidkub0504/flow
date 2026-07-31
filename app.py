@@ -1,6 +1,6 @@
 # Copyright (c) 2026 AJ Danboise Son Inc. All rights reserved.
 """
-AJD Work — an in-house, AJ-Danboise-branded replacement for monday.com.
+Danboise Flow — an in-house, AJ-Danboise-branded replacement for monday.com.
 
 Real per-user accounts (not a single shared password) since collaboration
 features (assigning a Person column, showing who changed what) fundamentally
@@ -14,11 +14,13 @@ import os
 import sys
 import csv
 import io
+import uuid
 import smtplib
 import threading
 from datetime import timedelta
 from email.mime.text import MIMEText
 from email.utils import formataddr
+from werkzeug.utils import secure_filename
 
 # Windows redirects stdout to a non-UTF-8 codepage by default, which crashes
 # any print() containing an emoji (e.g. the startup warnings below) the
@@ -29,7 +31,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-from flask import Flask, request, jsonify, render_template, session, redirect, Response
+from flask import Flask, request, jsonify, render_template, session, redirect, Response, send_from_directory
 from flask_socketio import SocketIO, join_room, emit
 from dotenv import load_dotenv
 
@@ -46,10 +48,13 @@ load_dotenv()
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = "/data" if os.path.isdir("/data") else os.path.join(APP_DIR, "data")
 os.makedirs(DATA_DIR, exist_ok=True)
+UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL") or f"sqlite:///{os.path.join(DATA_DIR, 'ajdwork.db')}"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25MB per uploaded file — job photos/PDFs, not video
 
 _secret = os.getenv("FLASK_SECRET_KEY")
 if not _secret:
@@ -90,7 +95,7 @@ def send_email(to_email, subject, body_text):
     try:
         msg = MIMEText(body_text)
         msg["Subject"] = subject
-        msg["From"] = formataddr(("AJD Work", SMTP_FROM))
+        msg["From"] = formataddr(("Danboise Flow", SMTP_FROM))
         msg["To"] = to_email
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
             if SMTP_USE_TLS:
@@ -538,6 +543,44 @@ def _coerce_csv_value(column, raw):
     if t in ("files", "time_tracking"):
         return None  # not meaningfully coercible from a single CSV cell
     return {"text": raw}
+
+
+@app.route("/api/uploads", methods=["POST"])
+def api_upload_file():
+    """Backs the Files column's actual upload button (job photos, invoices, etc).
+    Stored under a random name on disk — the original filename is kept only in
+    the ColumnValue JSON for display, so nothing here ever trusts user input
+    as a filesystem path."""
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"error": "No file provided"}), 400
+    original_name = secure_filename(f.filename) or "file"
+    ext = os.path.splitext(original_name)[1][:16]
+    stored_name = f"{uuid.uuid4().hex}{ext}"
+    f.save(os.path.join(UPLOAD_DIR, stored_name))
+    return jsonify({"name": original_name, "url": f"/uploads/{stored_name}"})
+
+
+@app.route("/uploads/<path:stored_name>")
+def serve_upload(stored_name):
+    # stored_name is always one of our own uuid-based names (see api_upload_file),
+    # so there's no user-controlled path component to worry about traversing.
+    if "/" in stored_name or "\\" in stored_name:
+        return jsonify({"error": "Not found"}), 404
+    return send_from_directory(UPLOAD_DIR, stored_name)
+
+
+@app.route("/api/uploads/<path:stored_name>", methods=["DELETE"])
+def delete_upload(stored_name):
+    # Best-effort cleanup when a file chip is removed from a Files column —
+    # not deleting the row still leaves the app fully correct, just an orphan
+    # file on disk, so failures here are never worth surfacing to the user.
+    if "/" in stored_name or "\\" in stored_name:
+        return jsonify({"error": "Not found"}), 404
+    path = os.path.join(UPLOAD_DIR, stored_name)
+    if os.path.isfile(path):
+        os.remove(path)
+    return jsonify({"success": True})
 
 
 @app.route("/api/boards/<int:board_id>/import_csv", methods=["POST"])
