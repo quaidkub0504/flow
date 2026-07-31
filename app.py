@@ -56,6 +56,12 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL") or f"sqlite://
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25MB per uploaded file — job photos/PDFs, not video
 
+# A fresh value every process start (i.e. every deploy) — templates append it
+# to static asset URLs (?v=...) so a browser that cached last deploy's JS/CSS
+# is forced to fetch the new copy instead of silently running stale code.
+ASSET_VERSION = os.getenv("RAILWAY_DEPLOYMENT_ID") or uuid.uuid4().hex[:10]
+app.jinja_env.globals["ASSET_VERSION"] = ASSET_VERSION
+
 _secret = os.getenv("FLASK_SECRET_KEY")
 if not _secret:
     _secret = os.urandom(32).hex()

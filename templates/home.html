@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Danboise Flow</title>
 <link rel="icon" href="/static/img/logo.png"/>
-<link rel="stylesheet" href="/static/css/app.css"/>
+<link rel="stylesheet" href="/static/css/app.css?v={{ ASSET_VERSION }}"/>
 </head>
 <body>
 {% include "_sidebar.html" %}
@@ -50,7 +50,7 @@
   </div>
 </div>
 
-<script src="/static/js/common.js"></script>
+<script src="/static/js/common.js?v={{ ASSET_VERSION }}"></script>
 <script>
 const USER = {{ user|tojson }};
 let ALL_BOARDS = [];
