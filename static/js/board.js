@@ -459,8 +459,10 @@ function renderCell(item, col){
       </div>`;
     }
     case 'number': {
+      const matchColor = matchFormatRule(col, val.number == null ? null : Number(val.number));
+      const style = matchColor ? `background:${matchColor};color:#fff;border-radius:4px;font-weight:700;` : '';
       return `<div class="cell">
-        <input type="number" value="${val.number ?? ''}"
+        <input type="number" value="${val.number ?? ''}" style="${style}"
                onchange="saveValue(${item.id},${col.id},{number:this.value===''?null:Number(this.value)})"/>
       </div>`;
     }
@@ -1218,9 +1220,11 @@ function onColumnResizeEnd(){
 }
 
 function openColumnMenu(evt, colId){
+  const col = STATE.columns.find(c => c.id === colId);
   openMenuAt(evt, `
     <div class="menu-item" onclick="openRenameColumnModal(${colId})">✎ Rename</div>
     <div class="menu-item" onclick="duplicateColumn(${colId})">⎘ Duplicate</div>
+    ${col && col.type === 'number' ? `<div class="menu-item" onclick="openFormatRulesModal(${colId})">🎨 Color rules</div>` : ''}
     <div class="menu-sep"></div>
     <div class="menu-item danger" onclick="confirmDeleteColumn(${colId})">🗑 Delete</div>
   `);
@@ -1258,6 +1262,77 @@ function confirmDeleteColumn(colId){
   }, async () => {
     await fetch(`/api/columns/${colId}`, {method: 'DELETE'});
   });
+}
+
+// ── Number column color rules (conditional formatting) ──────────────────
+// First matching rule (in saved order) wins — same "top rule wins" model
+// as monday's own column color-rules, kept to the operators a dispatcher
+// actually needs (at/above, at/below, exactly) instead of a full formula.
+const FORMAT_RULE_OPS = {gte: 'is ≥', lte: 'is ≤', gt: 'is >', lt: 'is <', eq: 'equals'};
+let FORMAT_RULES_COLUMN_ID = null;
+function matchFormatRule(col, num){
+  if (num == null || isNaN(num)) return null;
+  const rules = (col.settings && col.settings.formatting && col.settings.formatting.rules) || [];
+  for (const r of rules) {
+    if (r.op === 'gte' && num >= r.value) return r.color;
+    if (r.op === 'lte' && num <= r.value) return r.color;
+    if (r.op === 'gt' && num > r.value) return r.color;
+    if (r.op === 'lt' && num < r.value) return r.color;
+    if (r.op === 'eq' && num === r.value) return r.color;
+  }
+  return null;
+}
+function openFormatRulesModal(colId){
+  closeAllMenus();
+  FORMAT_RULES_COLUMN_ID = colId;
+  const valueInput = document.getElementById('formatRuleValue');
+  if (valueInput) valueInput.value = '';
+  renderFormatRulesList();
+  document.getElementById('formatRulesModal').style.display = 'flex';
+}
+function closeFormatRulesModal(){
+  document.getElementById('formatRulesModal').style.display = 'none';
+  FORMAT_RULES_COLUMN_ID = null;
+}
+function renderFormatRulesList(){
+  const col = STATE.columns.find(c => c.id === FORMAT_RULES_COLUMN_ID);
+  const list = document.getElementById('formatRulesList');
+  if (!col || !list) return;
+  const rules = (col.settings && col.settings.formatting && col.settings.formatting.rules) || [];
+  list.innerHTML = rules.length ? rules.map((r, i) => `
+    <div class="sort-row">
+      <span><span class="picker-swatch" style="background:${r.color};border-radius:50%;display:inline-block;margin-right:6px;"></span>${FORMAT_RULE_OPS[r.op] || r.op} ${esc(r.value)}</span>
+      <span class="file-chip-x" onclick="deleteFormatRule(${i})">✕</span>
+    </div>`).join('') : `<div style="color:var(--text-faint);font-size:12px;">No color rules yet — values won't be highlighted.</div>`;
+}
+async function addFormatRule(){
+  const op = document.getElementById('formatRuleOp').value;
+  const valueRaw = document.getElementById('formatRuleValue').value;
+  const color = document.getElementById('formatRuleColor').value;
+  if (valueRaw === '') return;
+  const col = STATE.columns.find(c => c.id === FORMAT_RULES_COLUMN_ID);
+  if (!col) return;
+  const formatting = Object.assign({}, col.settings.formatting, {
+    rules: [...((col.settings.formatting && col.settings.formatting.rules) || []), {op, value: Number(valueRaw), color}]
+  });
+  await saveColumnFormatting(col, formatting);
+  document.getElementById('formatRuleValue').value = '';
+}
+async function deleteFormatRule(idx){
+  const col = STATE.columns.find(c => c.id === FORMAT_RULES_COLUMN_ID);
+  if (!col) return;
+  const rules = ((col.settings.formatting && col.settings.formatting.rules) || []).filter((_, i) => i !== idx);
+  await saveColumnFormatting(col, Object.assign({}, col.settings.formatting, {rules}));
+}
+async function saveColumnFormatting(col, formatting){
+  const settings = Object.assign({}, col.settings, {formatting});
+  const r = await fetch(`/api/columns/${col.id}`, {
+    method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({settings})
+  });
+  const updated = await r.json();
+  col.settings = updated.settings;
+  renderFormatRulesList();
+  render();
 }
 
 // ── Row menu ──────────────────────────────────────────────────────────────

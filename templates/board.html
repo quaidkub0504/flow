@@ -139,6 +139,26 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="formatRulesModal" style="display:none;">
+  <div class="modal" style="width:380px;">
+    <div class="modal-hdr">Color Rules</div>
+    <div id="formatRulesList" style="margin-bottom:14px;max-height:220px;overflow-y:auto;"></div>
+    <div style="border-top:1px solid var(--border);padding-top:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+      <select id="formatRuleOp" style="width:auto;flex:1;">
+        <option value="gte">is ≥</option>
+        <option value="lte">is ≤</option>
+        <option value="gt">is &gt;</option>
+        <option value="lt">is &lt;</option>
+        <option value="eq">equals</option>
+      </select>
+      <input id="formatRuleValue" type="number" placeholder="value" style="width:70px;"/>
+      <input id="formatRuleColor" type="color" value="#00c875" style="width:40px;padding:2px;height:34px;"/>
+      <button class="btn-primary" style="width:100%;margin-top:2px;" onclick="addFormatRule()">+ Add rule</button>
+    </div>
+    <div class="modal-actions"><button class="btn-ghost" onclick="closeFormatRulesModal()">Close</button></div>
+  </div>
+</div>
+
 <div class="updates-panel" id="updatesPanel" style="display:none;"></div>
 <div class="updates-panel" id="activityLogPanel" style="display:none;"></div>
 
