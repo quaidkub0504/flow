@@ -161,7 +161,11 @@ function connectSocket(){
     if (panel.dataset.itemId == upd.item_id) appendUpdateToPanel(upd);
     if (upd.user && upd.user.id !== USER.id) {
       const item = STATE.items.find(i => i.id === upd.item_id);
-      fireDesktopNotification(`New update from ${upd.user.name}`, item ? item.name : 'An item was updated');
+      if (upd.mentioned_user_ids && upd.mentioned_user_ids.includes(USER.id)) {
+        fireDesktopNotification(`${upd.user.name} mentioned you`, item ? item.name : 'An item was updated');
+      } else {
+        fireDesktopNotification(`New update from ${upd.user.name}`, item ? item.name : 'An item was updated');
+      }
     }
   });
 }
@@ -1707,8 +1711,10 @@ async function openUpdates(itemId){
     </div>
     <div class="item-card-divider"></div>
     <div class="updates-list" id="updatesList" style="flex:1;"><div style="color:var(--text-faint);font-size:12px;">Loading…</div></div>
-    <div class="updates-input-row">
-      <textarea id="newUpdateBody" placeholder="Write an update…"></textarea>
+    <div class="updates-input-row" style="position:relative;">
+      <div class="picker" id="mentionSuggest" style="display:none;top:auto;bottom:100%;left:0;margin-bottom:4px;"></div>
+      <textarea id="newUpdateBody" placeholder="Write an update… (@ to mention someone)"
+                oninput="onUpdateBodyInput(event)" onkeydown="onUpdateBodyKeydown(event)"></textarea>
       <button class="btn-primary" onclick="postUpdate(${itemId})">Post</button>
     </div>`;
   const r = await fetch(`/api/items/${itemId}/updates`);
@@ -1720,6 +1726,13 @@ async function openUpdates(itemId){
 function closeUpdates(){
   document.getElementById('updatesPanel').style.display = 'none';
 }
+function renderUpdateBody(body){
+  const escaped = esc(body);
+  const names = ALL_USERS.map(u => u.name).filter(Boolean).sort((a, b) => b.length - a.length);
+  if (!names.length) return escaped;
+  const alt = names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  return escaped.replace(new RegExp(`(?<!\\w)@(${alt})(?!\\w)`, 'g'), m => `<span class="mention-chip">${m}</span>`);
+}
 function appendUpdateToPanel(upd){
   const list = document.getElementById('updatesList');
   if (!list) return;
@@ -1729,7 +1742,7 @@ function appendUpdateToPanel(upd){
   const when = upd.created_at ? new Date(upd.created_at).toLocaleString('en-US', {dateStyle:'medium', timeStyle:'short'}) : '';
   const div = document.createElement('div');
   div.className = 'update-item';
-  div.innerHTML = `<div class="update-meta"><b>${esc(name)}</b> · ${when}</div><div class="update-body">${esc(upd.body)}</div>`;
+  div.innerHTML = `<div class="update-meta"><b>${esc(name)}</b> · ${when}</div><div class="update-body">${renderUpdateBody(upd.body)}</div>`;
   list.appendChild(div);
   list.scrollTop = list.scrollHeight;
 }
@@ -1738,9 +1751,62 @@ async function postUpdate(itemId){
   const body = ta.value.trim();
   if (!body) return;
   ta.value = '';
+  closeMentionSuggest();
   await fetch(`/api/items/${itemId}/updates`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({body})
   });
+}
+
+// ── @mention autocomplete in the update composer ────────────────────────
+let MENTION_MATCHES = [];
+let MENTION_SELECTED = 0;
+function currentMentionQuery(ta){
+  const upToCaret = ta.value.slice(0, ta.selectionStart);
+  const m = upToCaret.match(/(?:^|\s)@([\w' -]*)$/);
+  return m ? m[1] : null;
+}
+function onUpdateBodyInput(evt){
+  const ta = evt.target;
+  const query = currentMentionQuery(ta);
+  const box = document.getElementById('mentionSuggest');
+  if (!box || query === null) { closeMentionSuggest(); return; }
+  MENTION_MATCHES = ALL_USERS.filter(u => u.name.toLowerCase().includes(query.toLowerCase())).slice(0, 6);
+  if (!MENTION_MATCHES.length) { closeMentionSuggest(); return; }
+  MENTION_SELECTED = 0;
+  box.style.display = 'block';
+  box.innerHTML = MENTION_MATCHES.map((u, i) => `
+    <div class="picker-option ${i === 0 ? 'selected' : ''}" onmousedown="event.preventDefault(); insertMention(${i})">
+      <span class="picker-swatch" style="background:${u.color};border-radius:50%;"></span>${esc(u.name)}
+    </div>`).join('');
+}
+function onUpdateBodyKeydown(evt){
+  const box = document.getElementById('mentionSuggest');
+  if (!box || box.style.display !== 'block' || !MENTION_MATCHES.length) return;
+  if (evt.key === 'ArrowDown') { evt.preventDefault(); MENTION_SELECTED = (MENTION_SELECTED + 1) % MENTION_MATCHES.length; highlightMentionSelection(); }
+  else if (evt.key === 'ArrowUp') { evt.preventDefault(); MENTION_SELECTED = (MENTION_SELECTED - 1 + MENTION_MATCHES.length) % MENTION_MATCHES.length; highlightMentionSelection(); }
+  else if (evt.key === 'Enter' || evt.key === 'Tab') { evt.preventDefault(); insertMention(MENTION_SELECTED); }
+  else if (evt.key === 'Escape') { evt.preventDefault(); closeMentionSuggest(); }
+}
+function highlightMentionSelection(){
+  document.querySelectorAll('#mentionSuggest .picker-option').forEach((row, i) => row.classList.toggle('selected', i === MENTION_SELECTED));
+}
+function insertMention(idx){
+  const u = MENTION_MATCHES[idx];
+  const ta = document.getElementById('newUpdateBody');
+  if (!u || !ta) return;
+  const upToCaret = ta.value.slice(0, ta.selectionStart);
+  const rest = ta.value.slice(ta.selectionStart);
+  const replaced = upToCaret.replace(/(?:^|\s)@([\w' -]*)$/, (m) => m[0] === '@' ? `@${u.name} ` : ` @${u.name} `);
+  ta.value = replaced + rest;
+  const caretPos = replaced.length;
+  ta.focus();
+  ta.setSelectionRange(caretPos, caretPos);
+  closeMentionSuggest();
+}
+function closeMentionSuggest(){
+  const box = document.getElementById('mentionSuggest');
+  if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+  MENTION_MATCHES = [];
 }
 
 // ── Board Activity Log (full audit trail for this board) ────────────────

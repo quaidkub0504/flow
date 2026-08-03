@@ -200,6 +200,7 @@ document.addEventListener('click', (e) => {
 const ACTIVITY_ACTION_TEXT = {
   created_board: 'created board', created_item: 'created', deleted_item: 'deleted an item',
   changed_value: 'updated', created_column: 'added a column', deleted_column: 'removed a column',
+  mentioned: 'was mentioned', automation_notify: 'was notified by an automation',
 };
 async function toggleBellPanel(){
   const panel = document.getElementById('bellPanel');

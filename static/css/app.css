@@ -234,6 +234,8 @@ table.board-table th:nth-child(4),table.board-table td:nth-child(4){left:72px;}
 .update-item{margin-bottom:16px;}
 .update-meta{font-size:11px;color:var(--text-faint);margin-bottom:3px;}
 .update-body{font-size:13px;line-height:1.5;color:var(--text);}
+.mention-chip{background:rgba(0,115,234,0.18);color:var(--accent-blue-hover);border-radius:4px;
+  padding:1px 4px;font-weight:700;}
 .updates-input-row{padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;}
 .updates-input-row textarea{flex:1;border:1px solid var(--border);border-radius:7px;padding:8px 10px;font-size:13px;
   resize:none;height:60px;font-family:inherit;background:var(--bg-app);color:var(--text);}

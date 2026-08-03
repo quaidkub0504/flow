@@ -11,6 +11,7 @@ updates live for everyone looking at a board at once.
 """
 
 import os
+import re
 import sys
 import csv
 import io
@@ -1193,6 +1194,27 @@ def api_delete_automation(automation_id):
     return jsonify({"success": True})
 
 
+def _parse_mentions(body, users):
+    """Match "@Full Name" tokens against real user names — longest name
+    first, claiming its character span, so "@John Smith" isn't also
+    double-counted as a separate mention of a shorter "@John"."""
+    mentioned = []
+    seen_ids = set()
+    claimed = []
+    for u in sorted(users, key=lambda u: -len(u.name or "")):
+        if not u.name:
+            continue
+        pattern = r"(?<!\w)@" + re.escape(u.name) + r"(?!\w)"
+        for m in re.finditer(pattern, body, re.IGNORECASE):
+            if any(s < m.end() and m.start() < e for s, e in claimed):
+                continue
+            claimed.append((m.start(), m.end()))
+            if u.id not in seen_ids:
+                seen_ids.add(u.id)
+                mentioned.append(u)
+    return mentioned
+
+
 @app.route("/api/items/<int:item_id>/updates", methods=["GET", "POST"])
 def api_item_updates(item_id):
     item = Item.query.get_or_404(item_id)
@@ -1200,11 +1222,29 @@ def api_item_updates(item_id):
         return jsonify([u.to_dict() for u in item.updates])
     data = request.get_json(force=True)
     user = current_user()
-    upd = Update(item_id=item_id, user_id=user.id, body=data.get("body") or "")
+    body = data.get("body") or ""
+    upd = Update(item_id=item_id, user_id=user.id, body=body)
     db.session.add(upd)
+
+    board = Board.query.get(item.board_id)
+    link = f"{APP_BASE_URL}/board/{item.board_id}"
+    mentioned_ids = []
+    for mu in _parse_mentions(body, User.query.all()):
+        if mu.id == user.id:
+            continue
+        mentioned_ids.append(mu.id)
+        db.session.add(ActivityLog(board_id=item.board_id, item_id=item.id, user_id=mu.id,
+                                    action="mentioned", detail=f"by {user.name} in \"{item.name}\""))
+        send_email_async(
+            mu.email, f"{user.name} mentioned you: {item.name}",
+            f"{user.name} mentioned you in an update on \"{item.name}\" ({board.name}):\n\n{body}\n\n"
+            f"View it here: {link}",
+        )
     db.session.commit()
+
     payload = upd.to_dict()
     payload["user"] = user.to_dict()
+    payload["mentioned_user_ids"] = mentioned_ids
     socketio.emit("update_posted", payload, room=f"board_{item.board_id}")
     return jsonify(payload)
 
