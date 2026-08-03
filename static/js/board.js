@@ -1260,6 +1260,7 @@ async function openBoardSettingsMenu(evt){
   const folderItems = folders.map(f => `<div class="menu-item" onclick="moveBoardToFolder(${f.id})">📁 ${esc(f.name)}</div>`).join('');
   openMenuAt({stopPropagation(){}, currentTarget: anchor}, `
     <div class="menu-item" onclick="closeAllMenus(); openAutomationsModal();">⚡ Automations</div>
+    <div class="menu-item" onclick="closeAllMenus(); openActivityLog();">📜 Activity Log</div>
     <div class="menu-sep"></div>
     <div class="menu-item" onclick="duplicateBoardFromPage()">⎘ Duplicate board</div>
     <div class="menu-item" onclick="closeAllMenus(); exportBoardCSV();">⬇ Export to CSV</div>
@@ -1703,6 +1704,32 @@ async function postUpdate(itemId){
   await fetch(`/api/items/${itemId}/updates`, {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({body})
   });
+}
+
+// ── Board Activity Log (full audit trail for this board) ────────────────
+
+async function openActivityLog(){
+  const panel = document.getElementById('activityLogPanel');
+  panel.style.display = 'flex';
+  panel.style.flexDirection = 'column';
+  panel.innerHTML = `
+    <div class="updates-hdr">
+      <span class="item-card-name">📜 Activity Log</span>
+      <span style="cursor:pointer;color:var(--text-faint);" onclick="closeActivityLog()">✕</span>
+    </div>
+    <div class="updates-list" id="activityLogList" style="flex:1;">
+      <div style="color:var(--text-faint);font-size:12px;">Loading…</div>
+    </div>`;
+  const rows = await fetch(`/api/activity?board_id=${BOARD_ID}&limit=200`).then(r => r.json());
+  document.getElementById('activityLogList').innerHTML = rows.length ? rows.map(r => `
+    <div class="update-item">
+      <div class="update-meta"><b>${esc(r.user_name)}</b> ${esc(ACTIVITY_ACTION_TEXT[r.action] || r.action)}
+        · ${timeAgo(r.created_at)}</div>
+      ${r.detail ? `<div class="update-body">${esc(r.detail)}</div>` : ''}
+    </div>`).join('') : `<div style="color:var(--text-faint);font-size:12px;">No activity yet.</div>`;
+}
+function closeActivityLog(){
+  document.getElementById('activityLogPanel').style.display = 'none';
 }
 
 // ── CSV export / import ───────────────────────────────────────────────────

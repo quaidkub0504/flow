@@ -153,6 +153,12 @@ document.addEventListener('click', (e) => {
 });
 
 // ── Notifications bell ───────────────────────────────────────────────────
+// Shared with the per-board Activity Log panel in board.js — one mapping
+// of action -> past-tense phrase for both surfaces.
+const ACTIVITY_ACTION_TEXT = {
+  created_board: 'created board', created_item: 'created', deleted_item: 'deleted an item',
+  changed_value: 'updated', created_column: 'added a column', deleted_column: 'removed a column',
+};
 async function toggleBellPanel(){
   const panel = document.getElementById('bellPanel');
   if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
@@ -160,13 +166,9 @@ async function toggleBellPanel(){
   panel.innerHTML = `<div class="bell-hdr">Notifications</div><div class="activity-empty">Loading…</div>`;
   const r = await fetch('/api/activity?limit=25');
   const rows = await r.json();
-  const ACTION_TEXT = {
-    created_board: 'created board', created_item: 'created', deleted_item: 'deleted an item',
-    changed_value: 'updated', created_column: 'added a column', deleted_column: 'removed a column',
-  };
   panel.innerHTML = `<div class="bell-hdr">Notifications</div>` + (rows.length ? rows.map(r => `
     <div class="activity-row">
-      <b>${esc_(r.user_name)}</b> ${esc_(ACTION_TEXT[r.action] || r.action)}
+      <b>${esc_(r.user_name)}</b> ${esc_(ACTIVITY_ACTION_TEXT[r.action] || r.action)}
       ${r.detail ? '— ' + esc_(r.detail) : ''} <span style="color:var(--text-faint);">in ${esc_(r.board_name)}</span>
       <div class="activity-time">${timeAgo(r.created_at)}</div>
     </div>`).join('') : `<div class="activity-empty">No activity yet.</div>`);

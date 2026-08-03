@@ -1213,8 +1213,15 @@ def api_item_updates(item_id):
 
 @app.route("/api/activity")
 def api_activity():
-    limit = min(int(request.args.get("limit", 30)), 100)
-    rows = ActivityLog.query.order_by(ActivityLog.created_at.desc()).limit(limit).all()
+    # No board_id -> the workspace-wide feed the notifications bell shows.
+    # With board_id -> a single board's full Log, opened from that board's
+    # settings menu (monday.com's own "Activity Log" panel).
+    limit = min(int(request.args.get("limit", 30)), 200)
+    query = ActivityLog.query
+    board_id = request.args.get("board_id", type=int)
+    if board_id:
+        query = query.filter_by(board_id=board_id)
+    rows = query.order_by(ActivityLog.created_at.desc()).limit(limit).all()
     board_names = {b.id: b.name for b in Board.query.all()}
     user_names = {u.id: u.name for u in User.query.all()}
     out = []
