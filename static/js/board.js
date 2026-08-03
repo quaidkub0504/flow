@@ -190,12 +190,31 @@ function applyFilterSearch(items){
       if (col.type === 'dropdown') {
         const ids = val.option_ids || [];
         if (!ids.some(id => selected.has(id))) return false;
+      } else if (col.type === 'person') {
+        const ids = val.user_ids || [];
+        if (!ids.some(id => selected.has(id))) return false;
+      } else if (col.type === 'checkbox') {
+        if (!selected.has(val.checked ? 'checked' : 'unchecked')) return false;
+      } else if (col.type === 'date') {
+        if (!matchesDateFilter(val.date, selected)) return false;
       } else {
         if (!val.label_id || !selected.has(val.label_id)) return false;
       }
     }
     return true;
   });
+}
+function matchesDateFilter(dateStr, selected){
+  const hasDate = !!dateStr;
+  if (selected.has('no_date') && !hasDate) return true;
+  if (!hasDate) return false;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const d = new Date(dateStr + 'T00:00:00');
+  const weekOut = new Date(today); weekOut.setDate(weekOut.getDate() + 7);
+  if (selected.has('overdue') && d < today) return true;
+  if (selected.has('today') && d.getTime() === today.getTime()) return true;
+  if (selected.has('this_week') && d >= today && d <= weekOut) return true;
+  return false;
 }
 function sortValueFor(item, col){
   const val = item.values[col.id] || {};
@@ -1437,38 +1456,68 @@ function confirmDeleteBoard(){
 
 // ── Filter / Sort / Hide toolbar panels ──────────────────────────────────
 
+const FILTER_CHECKBOX_OPTS = [['checked', 'Checked', '#00c875'], ['unchecked', 'Unchecked', '#3d3f57']];
+const FILTER_DATE_OPTS = [['overdue', 'Overdue'], ['today', 'Due today'], ['this_week', 'Due this week'], ['no_date', 'No date']];
+function buildFilterPanelHtml(){
+  const cols = STATE.columns.filter(c => ['status','priority','dropdown','person','checkbox','date'].includes(c.type));
+  let html = cols.length ? '' : `<div style="padding:6px;color:var(--text-faint);font-size:12px;">No filterable columns yet</div>`;
+  cols.forEach(c => {
+    const selected = FILTER_STATE[c.id] || new Set();
+    html += `<div class="filter-col-block"><div class="filter-col-name">${esc(c.name)}</div>`;
+    if (c.type === 'dropdown' || c.type === 'status' || c.type === 'priority') {
+      const opts = c.type === 'dropdown' ? (c.settings.options || []) : (c.settings.labels || []);
+      opts.forEach(o => {
+        const on = selected.has(o.id);
+        html += `<span class="filter-chip ${on?'on':''}" style="background:${o.color || '#579bfc'};" onclick="toggleFilterChip(${c.id},'${o.id}')">${esc(o.text)}</span>`;
+      });
+    } else if (c.type === 'person') {
+      ALL_USERS.forEach(u => {
+        const on = selected.has(u.id);
+        html += `<span class="filter-chip ${on?'on':''}" style="background:${u.color};" onclick="toggleFilterChip(${c.id},${u.id})">${esc(u.name)}</span>`;
+      });
+    } else if (c.type === 'checkbox') {
+      FILTER_CHECKBOX_OPTS.forEach(([key, label, color]) => {
+        const on = selected.has(key);
+        html += `<span class="filter-chip ${on?'on':''}" style="background:${color};" onclick="toggleFilterChip(${c.id},'${key}')">${esc(label)}</span>`;
+      });
+    } else if (c.type === 'date') {
+      FILTER_DATE_OPTS.forEach(([key, label]) => {
+        const on = selected.has(key);
+        html += `<span class="filter-chip ${on?'on':''}" style="background:#579bfc;" onclick="toggleFilterChip(${c.id},'${key}')">${esc(label)}</span>`;
+      });
+    }
+    html += `</div>`;
+  });
+  if (cols.length) html += `<div class="menu-item" style="justify-content:center;color:var(--accent-blue);" onclick="clearFilters()">Clear all filters</div>`;
+  return html;
+}
 function toggleFilterPanel(evt){
   evt.stopPropagation();
   if (document.getElementById('filterPanelEl')) { closeAllMenus(); return; }
   closeAllMenus();
-  const cols = STATE.columns.filter(c => ['status','priority','dropdown'].includes(c.type));
-  let html = cols.length ? '' : `<div style="padding:6px;color:var(--text-faint);font-size:12px;">No filterable columns (add a Status, Priority, or Dropdown column)</div>`;
-  cols.forEach(c => {
-    const opts = c.type === 'dropdown' ? (c.settings.options || []) : (c.settings.labels || []);
-    const selected = FILTER_STATE[c.id] || new Set();
-    html += `<div class="filter-col-block"><div class="filter-col-name">${esc(c.name)}</div>`;
-    opts.forEach(o => {
-      const on = selected.has(o.id);
-      html += `<span class="filter-chip ${on?'on':''}" style="background:${o.color || '#579bfc'};" onclick="toggleFilterChip(${c.id},'${o.id}')">${esc(o.text)}</span>`;
-    });
-    html += `</div>`;
-  });
-  if (cols.length) html += `<div class="menu-item" style="justify-content:center;color:var(--accent-blue);" onclick="clearFilters()">Clear all filters</div>`;
   const rect = evt.currentTarget.getBoundingClientRect();
   const panel = document.createElement('div');
   panel.id = 'filterPanelEl';
   panel.className = 'filter-panel app-menu';
   panel.style.position = 'fixed'; panel.style.top = (rect.bottom+6)+'px'; panel.style.left = rect.left+'px';
-  panel.innerHTML = html;
+  panel.innerHTML = buildFilterPanelHtml();
   document.body.appendChild(panel);
 }
 function toggleFilterChip(colId, optId){
   if (!FILTER_STATE[colId]) FILTER_STATE[colId] = new Set();
   const set = FILTER_STATE[colId];
   if (set.has(optId)) set.delete(optId); else set.add(optId);
-  closeAllMenus();
   updateToolbarActiveStates();
   render();
+  // Deferred: replacing the panel's innerHTML synchronously here would
+  // detach the clicked chip from the document mid-bubble, so the
+  // document-level "click outside a menu" listener (which checks
+  // e.target.closest('.app-menu') once the click reaches it) would see
+  // an orphaned target and wrongly close the panel it's still inside.
+  setTimeout(() => {
+    const panel = document.getElementById('filterPanelEl');
+    if (panel) panel.innerHTML = buildFilterPanelHtml();
+  }, 0);
 }
 function clearFilters(){ FILTER_STATE = {}; closeAllMenus(); updateToolbarActiveStates(); render(); }
 
