@@ -1366,13 +1366,27 @@ async function saveColumnFormatting(col, formatting){
 function openRowMenu(evt, itemId){
   const item = STATE.items.find(i => i.id === itemId);
   const isSubitem = !!(item && item.parent_id);
+  // Reordering between groups is otherwise drag-only, which touch
+  // devices can't do — this menu is the only way to move an item on
+  // mobile, so it's worth the extra section even though desktop users
+  // will mostly just drag.
+  const otherGroups = !isSubitem ? STATE.groups.filter(g => g.id !== item.group_id) : [];
+  const moveHtml = otherGroups.length ? `
+    <div class="menu-sep"></div>
+    <div class="filter-col-name" style="padding:6px 10px 2px;">Move to group</div>
+    ${otherGroups.map(g => `<div class="menu-item" onclick="closeAllMenus(); moveItemToGroup(${itemId}, ${g.id});"><span style="color:${g.color};">●</span> ${esc(g.name)}</div>`).join('')}
+  ` : '';
   openMenuAt(evt, `
     <div class="menu-item" onclick="closeAllMenus();openUpdates(${itemId})">⤢ Open</div>
     ${!isSubitem ? `<div class="menu-item" onclick="addSubitem(${itemId})">➕ Add subitem</div>` : ''}
     <div class="menu-item" onclick="duplicateItemRow(${itemId})">⎘ Duplicate</div>
+    ${moveHtml}
     <div class="menu-sep"></div>
     <div class="menu-item danger" onclick="confirmDeleteItem(${itemId})">🗑 Delete</div>
   `);
+}
+function moveItemToGroup(itemId, targetGroupId){
+  moveItemRelativeTo(itemId, targetGroupId, null);
 }
 async function addSubitem(parentId){
   closeAllMenus();
