@@ -1424,26 +1424,8 @@ async function submitNewColumn(){
   render();
 }
 
-// New-board modal (sidebar's "+ New Board" also works from inside a board page)
-function openNewBoardModal(){
-  document.getElementById('newBoardModal').style.display = 'flex';
-  populateBoardTemplateSelect();
-}
-function closeNewBoardModal(){
-  document.getElementById('newBoardModal').style.display = 'none';
-  document.getElementById('newBoardName').value = '';
-}
-async function submitNewBoard(){
-  const name = document.getElementById('newBoardName').value.trim();
-  if (!name) return;
-  const template = document.getElementById('newBoardTemplate').value;
-  const r = await fetch('/api/boards', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({name, template})
-  });
-  const board = await r.json();
-  window.location.href = '/board/' + board.id;
-}
+// New-board modal now lives in common.js + _sidebar.html (shared across
+// every page instead of duplicated per-template).
 
 // New-view modal
 function openNewViewModal(){

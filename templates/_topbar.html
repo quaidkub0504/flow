@@ -4,11 +4,26 @@
     <input id="globalSearchInput" name="ajdwork_global_search" placeholder="Search for anything…"
            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
            oninput="onGlobalSearchInput(this.value)"/>
+    <span class="global-search-hint" onclick="openCommandPalette()" title="Quick actions (Ctrl/Cmd+K)">⌘K</span>
     <div id="searchDropdown" class="search-dropdown" style="display:none;"></div>
   </div>
   <div class="topbar-actions">
     <button class="bell-btn" onclick="toggleBellPanel()" title="Notifications">🔔</button>
     <div id="bellPanel" class="bell-panel" style="display:none;"></div>
     <div class="user-chip" style="background:{{ user.color }};" title="{{ user.name }}">{{ user.name[0]|upper }}</div>
+  </div>
+</div>
+
+<div class="cmd-palette-backdrop" id="cmdPaletteBackdrop" style="display:none;"
+     onclick="if (event.target === this) closeCommandPalette();">
+  <div class="cmd-palette">
+    <div class="cmd-palette-input-row">
+      <span class="global-search-icon" style="position:static;">⌕</span>
+      <input id="cmdPaletteInput" placeholder="Search boards, items, or jump to a page…"
+             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+             oninput="onCommandPaletteInput(this.value)" onkeydown="cmdPaletteKeydown(event)"/>
+      <span class="cmd-palette-hint">Esc</span>
+    </div>
+    <div class="cmd-palette-results" id="cmdPaletteResults"></div>
   </div>
 </div>

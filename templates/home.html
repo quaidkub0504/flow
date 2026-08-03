@@ -27,18 +27,6 @@
   </div>
 </div>
 
-<div class="modal-backdrop" id="newBoardModal" style="display:none;">
-  <div class="modal">
-    <div class="modal-hdr">Create a Board</div>
-    <input id="newBoardName" placeholder="Board name" autofocus/>
-    <select id="newBoardTemplate"></select>
-    <div class="modal-actions">
-      <button class="btn-ghost" onclick="closeNewBoardModal()">Cancel</button>
-      <button class="btn-primary" onclick="submitNewBoard()">Create</button>
-    </div>
-  </div>
-</div>
-
 <div class="modal-backdrop" id="confirmModal" style="display:none;">
   <div class="modal">
     <div class="modal-hdr" id="confirmModalHdr">Are you sure?</div>
@@ -170,27 +158,6 @@ async function loadArchivedBoards(){
         <div class="board-card-sub">Archived</div>
       </div>`).join('')
     : `<div class="empty-state">No archived boards.</div>`;
-}
-
-function openNewBoardModal(){
-  document.getElementById('newBoardModal').style.display = 'flex';
-  document.getElementById('newBoardName').focus();
-  populateBoardTemplateSelect();
-}
-function closeNewBoardModal(){
-  document.getElementById('newBoardModal').style.display = 'none';
-  document.getElementById('newBoardName').value = '';
-}
-async function submitNewBoard(){
-  const name = document.getElementById('newBoardName').value.trim();
-  if (!name) return;
-  const template = document.getElementById('newBoardTemplate').value;
-  const r = await fetch('/api/boards', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({name, template})
-  });
-  const board = await r.json();
-  window.location.href = '/board/' + board.id;
 }
 
 loadBoards();

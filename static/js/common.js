@@ -32,6 +32,7 @@ document.addEventListener('keydown', (e) => {
   if (typeof closeAllMenus === 'function') closeAllMenus();
   if (typeof closeMenus === 'function') closeMenus();
   if (typeof closeUpdates === 'function') closeUpdates();
+  if (typeof closeCommandPalette === 'function') closeCommandPalette();
   document.querySelectorAll('.modal-backdrop').forEach(m => { m.style.display = 'none'; });
 });
 
@@ -100,12 +101,34 @@ function fireDesktopNotification(title, body){
 if (document.readyState !== 'loading') initNotificationBanner();
 else document.addEventListener('DOMContentLoaded', initNotificationBanner);
 
-// ── Shared "New Board" template select (used by home.html and board.html) ─
+// ── Shared "New Board" modal — markup lives once in _sidebar.html so every
+// page that includes the sidebar (home, board, team, my-work) gets a working
+// "+ New Board" button for free, instead of each page needing its own copy.
 async function populateBoardTemplateSelect(){
   const sel = document.getElementById('newBoardTemplate');
   if (!sel || sel.options.length) return;  // already populated
   const templates = await fetch('/api/board_templates').then(r => r.json());
   sel.innerHTML = templates.map(t => `<option value="${t.key}">${esc_(t.label)}</option>`).join('');
+}
+function openNewBoardModal(){
+  document.getElementById('newBoardModal').style.display = 'flex';
+  document.getElementById('newBoardName').focus();
+  populateBoardTemplateSelect();
+}
+function closeNewBoardModal(){
+  document.getElementById('newBoardModal').style.display = 'none';
+  document.getElementById('newBoardName').value = '';
+}
+async function submitNewBoard(){
+  const name = document.getElementById('newBoardName').value.trim();
+  if (!name) return;
+  const template = document.getElementById('newBoardTemplate').value;
+  const r = await fetch('/api/boards', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name, template})
+  });
+  const board = await r.json();
+  window.location.href = '/board/' + board.id;
 }
 
 // ── Global search ─────────────────────────────────────────────────────────
@@ -173,3 +196,99 @@ async function toggleBellPanel(){
       <div class="activity-time">${timeAgo(r.created_at)}</div>
     </div>`).join('') : `<div class="activity-empty">No activity yet.</div>`);
 }
+
+// ── Command palette (Ctrl/Cmd+K) — quick nav + fuzzy jump to any board or
+// item, from anywhere in the app. The overlay markup lives once in
+// _topbar.html, same "shared partial" approach as the New Board modal.
+const CMD_STATIC_ACTIONS = [
+  {label: 'Go to My Work', icon: '🗂️', href: '/my-work'},
+  {label: 'Go to Team', icon: '👥', href: '/team'},
+  {label: 'Go to All Boards', icon: '🏠', href: '/'},
+  {label: 'Create a new board', icon: '➕', run: () => { closeCommandPalette(); openNewBoardModal(); }},
+];
+let CMD_ITEMS = [];
+let CMD_SELECTED = 0;
+let _cmdDebounce = null;
+
+function openCommandPalette(){
+  const bd = document.getElementById('cmdPaletteBackdrop');
+  if (!bd) return;
+  if (typeof closeAllMenus === 'function') closeAllMenus();
+  if (typeof closePicker === 'function') closePicker();
+  bd.style.display = 'flex';
+  const input = document.getElementById('cmdPaletteInput');
+  input.value = '';
+  input.focus();
+  renderCommandPaletteResults('', {boards: [], items: []});
+}
+function closeCommandPalette(){
+  const bd = document.getElementById('cmdPaletteBackdrop');
+  if (bd) bd.style.display = 'none';
+}
+function onCommandPaletteInput(q){
+  clearTimeout(_cmdDebounce);
+  if (!q.trim()) { renderCommandPaletteResults('', {boards: [], items: []}); return; }
+  _cmdDebounce = setTimeout(async () => {
+    const r = await fetch(`/api/search?q=${encodeURIComponent(q.trim())}`);
+    renderCommandPaletteResults(q, await r.json());
+  }, 150);
+}
+function renderCommandPaletteResults(q, data){
+  const ql = q.trim().toLowerCase();
+  const actions = CMD_STATIC_ACTIONS.filter(a => !ql || a.label.toLowerCase().includes(ql));
+  CMD_ITEMS = [];
+  let html = '';
+  const addSection = (label, rows, toItem, rowHtml) => {
+    if (!rows.length) return;
+    html += `<div class="cmd-section-label">${label}</div>`;
+    rows.forEach(row => {
+      const idx = CMD_ITEMS.length;
+      CMD_ITEMS.push(toItem(row));
+      html += `<div class="cmd-result-row" data-idx="${idx}" onclick="runCommandPaletteItem(${idx})">${rowHtml(row)}</div>`;
+    });
+  };
+  addSection('Actions', actions, a => a, a => `<span class="cmd-result-icon">${a.icon}</span><span>${esc_(a.label)}</span>`);
+  addSection('Boards', data.boards || [], b => ({label: b.name, href: `/board/${b.id}`}),
+    b => `<span class="cmd-result-icon">${esc_(b.icon)}</span><span>${esc_(b.name)}</span>`);
+  addSection('Items', data.items || [], i => ({label: i.name, href: `/board/${i.board_id}`}),
+    i => `<span class="cmd-result-icon">▤</span><span>${esc_(i.name)}</span><span class="cmd-result-sub">${esc_(i.board_name)}</span>`);
+  const results = document.getElementById('cmdPaletteResults');
+  results.innerHTML = CMD_ITEMS.length ? html : `<div class="cmd-palette-empty">No matches</div>`;
+  CMD_SELECTED = 0;
+  highlightCommandPaletteSelection();
+}
+function highlightCommandPaletteSelection(){
+  document.querySelectorAll('#cmdPaletteResults .cmd-result-row').forEach(el => {
+    el.classList.toggle('active', Number(el.dataset.idx) === CMD_SELECTED);
+  });
+  const active = document.querySelector('#cmdPaletteResults .cmd-result-row.active');
+  if (active) active.scrollIntoView({block: 'nearest'});
+}
+function runCommandPaletteItem(idx){
+  const item = CMD_ITEMS[idx];
+  if (!item) return;
+  if (item.run) { item.run(); return; }
+  closeCommandPalette();
+  window.location.href = item.href;
+}
+function cmdPaletteKeydown(evt){
+  if (evt.key === 'ArrowDown') {
+    evt.preventDefault();
+    CMD_SELECTED = Math.min(CMD_SELECTED + 1, CMD_ITEMS.length - 1);
+    highlightCommandPaletteSelection();
+  } else if (evt.key === 'ArrowUp') {
+    evt.preventDefault();
+    CMD_SELECTED = Math.max(CMD_SELECTED - 1, 0);
+    highlightCommandPaletteSelection();
+  } else if (evt.key === 'Enter') {
+    evt.preventDefault();
+    runCommandPaletteItem(CMD_SELECTED);
+  }
+}
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'k') return;
+  e.preventDefault();
+  const bd = document.getElementById('cmdPaletteBackdrop');
+  if (!bd) return;
+  if (bd.style.display === 'flex') closeCommandPalette(); else openCommandPalette();
+});

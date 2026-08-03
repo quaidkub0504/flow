@@ -23,6 +23,18 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="newBoardModal" style="display:none;">
+  <div class="modal">
+    <div class="modal-hdr">Create a Board</div>
+    <input id="newBoardName" placeholder="Board name"/>
+    <select id="newBoardTemplate"></select>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeNewBoardModal()">Cancel</button>
+      <button class="btn-primary" onclick="submitNewBoard()">Create</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="newFolderModal" style="display:none;">
   <div class="modal">
     <div class="modal-hdr">New Folder</div>
