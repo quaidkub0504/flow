@@ -834,6 +834,11 @@ def api_update_column(column_id):
         column.name = data["name"].strip()
     if "settings" in data:
         column.settings = data["settings"]
+    if "width" in data:
+        try:
+            column.width = max(60, min(600, int(data["width"])))
+        except (TypeError, ValueError):
+            pass
     db.session.commit()
     payload = column.to_dict()
     socketio.emit("column_updated", payload, room=f"board_{column.board_id}")

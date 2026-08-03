@@ -13,6 +13,10 @@ let DRAG_GROUP_ID = null;
 const GROUP_COLORS = ["#579bfc","#00c875","#fdab3d","#e2445c","#a25ddc","#66ccff","#ff642e","#037f4c"];
 let CALENDAR_VIEW_DATE = new Date();
 let EXPANDED_ITEMS = new Set();
+let TIMELINE_VIEW_START = startOfMonth(new Date());
+const TIMELINE_MONTHS = 3;      // width of the visible window before Prev/Next pages it
+const TIMELINE_DAY_WIDTH = 30;  // px per day — matches monday's default Timeline zoom roughly
+let TIMELINE_DRAG = null;       // {itemId, columnId, mode, startX, origStart, origEnd} while dragging a bar
 
 function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -239,6 +243,7 @@ function render(){
   if (!view) { document.getElementById('boardScroll').innerHTML = ''; return; }
   if (view.type === 'kanban') renderKanbanView();
   else if (view.type === 'calendar') renderCalendarView();
+  else if (view.type === 'timeline') renderTimelineView();
   else if (view.type === 'dashboard') renderDashboardView();
   else renderTableView();
 }
@@ -289,10 +294,11 @@ function renderTable(group, items){
         <th style="width:20px;"></th>
         <th style="min-width:240px;">Item</th>
         ${cols.map(c => `
-          <th style="width:${c.width}px;">
+          <th style="width:${c.width}px;" data-col-id="${c.id}">
             <div class="th-wrap">
               <span>${esc(c.name)}${SORT_STATE.columnId===c.id ? `<span class="th-sort-indicator">${SORT_STATE.dir==='desc'?'↓':'↑'}</span>` : ''}</span>
               <span class="th-menu-btn" onclick="openColumnMenu(event, ${c.id})">⋮</span>
+              <span class="col-resize-handle" onmousedown="columnResizeStart(event, ${c.id})"></span>
             </div>
           </th>`).join('')}
         <th style="width:36px;"><span class="add-col-btn" onclick="openNewColumnModal()">+</span></th>
@@ -341,7 +347,7 @@ function renderRow(group, item){
           onblur="saveItemName(${item.id}, this)"
           onkeydown="if(event.key==='Enter'){event.preventDefault(); this.blur();}"
           ondblclick="openUpdates(${item.id})">${esc(item.name)}</td>
-      ${cols.map(col => `<td>${renderCell(item, col)}</td>`).join('')}
+      ${cols.map(col => `<td style="width:${col.width}px;" data-col-id="${col.id}">${renderCell(item, col)}</td>`).join('')}
       <td><div class="row-menu-btn" onclick="openRowMenu(event, ${item.id})">⋮</div></td>
     </tr>`;
 }
@@ -357,7 +363,7 @@ function renderSubitemRow(group, child){
           onblur="saveItemName(${child.id}, this)"
           onkeydown="if(event.key==='Enter'){event.preventDefault(); this.blur();}"
           ondblclick="openUpdates(${child.id})">${esc(child.name)}</td>
-      ${cols.map(col => `<td>${renderCell(child, col)}</td>`).join('')}
+      ${cols.map(col => `<td style="width:${col.width}px;" data-col-id="${col.id}">${renderCell(child, col)}</td>`).join('')}
       <td><div class="row-menu-btn" onclick="openRowMenu(event, ${child.id})">⋮</div></td>
     </tr>`;
 }
@@ -593,6 +599,171 @@ async function addCalendarItem(dateStr, dateColId){
   if (!STATE.items.find(i => i.id === item.id)) STATE.items.push(item);
   await saveValue(item.id, dateColId, {date: dateStr});
   render();
+}
+
+// ── Timeline (Gantt) view ────────────────────────────────────────────────
+// Renders each item with a Timeline column as a draggable/resizable bar
+// across a scrolling date axis — monday.com's signature view. Dragging the
+// bar body reschedules both dates together; the two edge handles resize
+// the start/end independently. Dates are kept as local-midnight Dates
+// throughout (matching the Calendar view's existing convention) since the
+// board never deals in timezones, only YYYY-MM-DD strings.
+
+function startOfMonth(d){ return new Date(d.getFullYear(), d.getMonth(), 1); }
+function fromDateStr(s){ const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); }
+function toDateStr(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function daysBetweenLocal(a, b){ return Math.round((b - a) / 86400000); }
+
+function renderTimelineView(){
+  const container = document.getElementById('boardScroll');
+  const tlCol = STATE.columns.find(c => c.type === 'timeline');
+  if (!tlCol) {
+    container.innerHTML = `<div class="empty-state">Add a Timeline column to use the Timeline view.</div>`;
+    return;
+  }
+  const statusCol = STATE.columns.find(c => c.type === 'status');
+  const rangeStart = TIMELINE_VIEW_START;
+  const rangeEnd = new Date(rangeStart.getFullYear(), rangeStart.getMonth() + TIMELINE_MONTHS, 1);
+  const totalDays = daysBetweenLocal(rangeStart, rangeEnd);
+  const totalWidth = totalDays * TIMELINE_DAY_WIDTH;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const todayOffset = daysBetweenLocal(rangeStart, today);
+  const todayLine = (todayOffset >= 0 && todayOffset < totalDays)
+    ? `<div class="tl-today-line" style="left:${todayOffset * TIMELINE_DAY_WIDTH}px;"></div>` : '';
+
+  let monthsHtml = '';
+  let cursor = new Date(rangeStart);
+  while (cursor < rangeEnd) {
+    const nextMonth = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+    const segEnd = nextMonth < rangeEnd ? nextMonth : rangeEnd;
+    const segDays = daysBetweenLocal(cursor, segEnd);
+    monthsHtml += `<div class="tl-month" style="width:${segDays * TIMELINE_DAY_WIDTH}px;">${cursor.toLocaleDateString('en-US',{month:'long', year:'numeric'})}</div>`;
+    cursor = nextMonth;
+  }
+
+  const items = applyFilterSearch(STATE.items.filter(i => !i.parent_id));
+  const groupsHtml = STATE.groups.map(group => {
+    const groupItems = items.filter(i => i.group_id === group.id);
+    const rows = groupItems.map(item => renderTimelineRow(item, tlCol, statusCol, rangeStart, totalWidth, todayLine)).join('');
+    return `
+      <div class="tl-row tl-group-row">
+        <div class="tl-namecell tl-group-namecell" style="--gcolor:${group.color};">${esc(group.name)}</div>
+        <div class="tl-lane" style="width:${totalWidth}px;">${todayLine}</div>
+      </div>
+      ${rows}`;
+  }).join('');
+
+  const rangeLabel = `${rangeStart.toLocaleDateString('en-US',{month:'short',year:'numeric'})} – ` +
+    `${new Date(rangeEnd.getFullYear(), rangeEnd.getMonth() - 1, 1).toLocaleDateString('en-US',{month:'short',year:'numeric'})}`;
+
+  container.innerHTML = `
+    <div class="calendar-toolbar">
+      <button class="tb-btn" onclick="timelineNav(-1)">‹ Prev</button>
+      <span class="calendar-month-label">${rangeLabel}</span>
+      <button class="tb-btn" onclick="timelineNav(1)">Next ›</button>
+      <button class="tb-btn" onclick="timelineToday()">Today</button>
+    </div>
+    <div class="tl-header-row">
+      <div class="tl-header-spacer">Item</div>
+      <div class="tl-lane tl-header-months" style="width:${totalWidth}px;">${monthsHtml}${todayLine}</div>
+    </div>
+    ${groupsHtml || `<div class="empty-state">No items yet.</div>`}`;
+}
+
+function renderTimelineRow(item, tlCol, statusCol, rangeStart, totalWidth, todayLine){
+  const val = item.values[tlCol.id] || {};
+  let barHtml;
+  if (val.start && val.end) {
+    const s = fromDateStr(val.start), e = fromDateStr(val.end);
+    const left = daysBetweenLocal(rangeStart, s) * TIMELINE_DAY_WIDTH;
+    const width = Math.max(TIMELINE_DAY_WIDTH, (daysBetweenLocal(s, e) + 1) * TIMELINE_DAY_WIDTH);
+    let color = '#579bfc';
+    if (statusCol) {
+      const label = (statusCol.settings.labels || []).find(l => l.id === (item.values[statusCol.id] || {}).label_id);
+      if (label) color = label.color;
+    }
+    barHtml = `
+      <div class="tl-bar" data-item-id="${item.id}" style="left:${left}px;width:${width}px;background:${color};"
+           title="${esc(item.name)} (${val.start} → ${val.end})"
+           onmousedown="timelineDragStart(event, ${item.id}, ${tlCol.id}, 'move')"
+           ondblclick="event.stopPropagation(); openUpdates(${item.id})">
+        <span class="tl-bar-handle tl-bar-handle-l" onmousedown="timelineDragStart(event, ${item.id}, ${tlCol.id}, 'resize-start')"></span>
+        <span class="tl-bar-label">${esc(item.name)}</span>
+        <span class="tl-bar-handle tl-bar-handle-r" onmousedown="timelineDragStart(event, ${item.id}, ${tlCol.id}, 'resize-end')"></span>
+      </div>`;
+  } else {
+    barHtml = `<div class="tl-bar-empty-hint" onclick="quickScheduleTimelineItem(${item.id}, ${tlCol.id})">+ Set dates</div>`;
+  }
+  return `
+    <div class="tl-row">
+      <div class="tl-namecell" ondblclick="openUpdates(${item.id})">${esc(item.name)}</div>
+      <div class="tl-lane" style="width:${totalWidth}px;">${todayLine}${barHtml}</div>
+    </div>`;
+}
+
+function quickScheduleTimelineItem(itemId, columnId){
+  const start = new Date();
+  const end = new Date();
+  end.setDate(end.getDate() + 3);
+  saveValue(itemId, columnId, {start: toDateStr(start), end: toDateStr(end)});
+  render();
+}
+
+function timelineNav(delta){
+  TIMELINE_VIEW_START = new Date(TIMELINE_VIEW_START.getFullYear(), TIMELINE_VIEW_START.getMonth() + delta, 1);
+  render();
+}
+function timelineToday(){
+  TIMELINE_VIEW_START = startOfMonth(new Date());
+  render();
+}
+
+function timelineDragStart(evt, itemId, columnId, mode){
+  evt.preventDefault();
+  evt.stopPropagation();
+  const item = STATE.items.find(i => i.id === itemId);
+  const val = item ? (item.values[columnId] || {}) : {};
+  if (!val.start || !val.end) return;
+  TIMELINE_DRAG = {itemId, columnId, mode, startX: evt.clientX, origStart: val.start, origEnd: val.end,
+                    pendingStart: val.start, pendingEnd: val.end};
+  document.addEventListener('mousemove', onTimelineDragMove);
+  document.addEventListener('mouseup', onTimelineDragEnd);
+}
+function onTimelineDragMove(evt){
+  if (!TIMELINE_DRAG) return;
+  const dayDelta = Math.round((evt.clientX - TIMELINE_DRAG.startX) / TIMELINE_DAY_WIDTH);
+  let newStart = fromDateStr(TIMELINE_DRAG.origStart);
+  let newEnd = fromDateStr(TIMELINE_DRAG.origEnd);
+  if (TIMELINE_DRAG.mode === 'move') {
+    newStart.setDate(newStart.getDate() + dayDelta);
+    newEnd.setDate(newEnd.getDate() + dayDelta);
+  } else if (TIMELINE_DRAG.mode === 'resize-start') {
+    newStart.setDate(newStart.getDate() + dayDelta);
+    if (newStart > newEnd) newStart = new Date(newEnd);
+  } else {
+    newEnd.setDate(newEnd.getDate() + dayDelta);
+    if (newEnd < newStart) newEnd = new Date(newStart);
+  }
+  TIMELINE_DRAG.pendingStart = toDateStr(newStart);
+  TIMELINE_DRAG.pendingEnd = toDateStr(newEnd);
+  const bar = document.querySelector(`.tl-bar[data-item-id="${TIMELINE_DRAG.itemId}"]`);
+  if (bar) {
+    const left = daysBetweenLocal(TIMELINE_VIEW_START, newStart) * TIMELINE_DAY_WIDTH;
+    const width = Math.max(TIMELINE_DAY_WIDTH, (daysBetweenLocal(newStart, newEnd) + 1) * TIMELINE_DAY_WIDTH);
+    bar.style.left = left + 'px';
+    bar.style.width = width + 'px';
+  }
+}
+function onTimelineDragEnd(){
+  if (!TIMELINE_DRAG) return;
+  document.removeEventListener('mousemove', onTimelineDragMove);
+  document.removeEventListener('mouseup', onTimelineDragEnd);
+  const {itemId, columnId, pendingStart, pendingEnd, origStart, origEnd} = TIMELINE_DRAG;
+  TIMELINE_DRAG = null;
+  if (pendingStart !== origStart || pendingEnd !== origEnd) {
+    saveValue(itemId, columnId, {start: pendingStart, end: pendingEnd});
+    render();
+  }
 }
 
 // ── Dashboard view ────────────────────────────────────────────────────────
@@ -953,6 +1124,39 @@ function openMenuAt(evt, html){
 function closeAllMenus(){ document.querySelectorAll('.app-menu').forEach(m => m.remove()); }
 
 // ── Column header menu ────────────────────────────────────────────────────
+
+let COLUMN_RESIZE = null;
+function columnResizeStart(evt, colId){
+  evt.preventDefault();
+  evt.stopPropagation();
+  const col = STATE.columns.find(c => c.id === colId);
+  if (!col) return;
+  COLUMN_RESIZE = {colId, startX: evt.clientX, startWidth: col.width, pendingWidth: col.width};
+  evt.currentTarget.classList.add('resizing');
+  document.addEventListener('mousemove', onColumnResizeMove);
+  document.addEventListener('mouseup', onColumnResizeEnd);
+}
+function onColumnResizeMove(evt){
+  if (!COLUMN_RESIZE) return;
+  const delta = evt.clientX - COLUMN_RESIZE.startX;
+  const width = Math.max(60, Math.min(600, COLUMN_RESIZE.startWidth + delta));
+  document.querySelectorAll(`[data-col-id="${COLUMN_RESIZE.colId}"]`).forEach(el => { el.style.width = width + 'px'; });
+  COLUMN_RESIZE.pendingWidth = width;
+}
+function onColumnResizeEnd(){
+  if (!COLUMN_RESIZE) return;
+  document.removeEventListener('mousemove', onColumnResizeMove);
+  document.removeEventListener('mouseup', onColumnResizeEnd);
+  document.querySelectorAll('.col-resize-handle.resizing').forEach(el => el.classList.remove('resizing'));
+  const {colId, pendingWidth, startWidth} = COLUMN_RESIZE;
+  COLUMN_RESIZE = null;
+  if (pendingWidth === startWidth) return;
+  const col = STATE.columns.find(c => c.id === colId);
+  if (col) col.width = pendingWidth;
+  fetch(`/api/columns/${colId}`, {
+    method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({width: pendingWidth})
+  });
+}
 
 function openColumnMenu(evt, colId){
   openMenuAt(evt, `

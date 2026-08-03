@@ -113,7 +113,7 @@ td.drag-handle-cell{width:22px;text-align:center;opacity:0;}
 tr:hover td.drag-handle-cell{opacity:1;}
 td.select-cell{width:30px;text-align:center;}
 td.select-cell input,th.select-cell input{accent-color:var(--accent-blue);cursor:pointer;}
-tr.row-selected td{background:rgba(0,115,234,0.10);}
+table.board-table tr.row-selected td{background:rgba(0,115,234,0.10);}
 tr.drag-over-row{box-shadow:inset 0 2px 0 var(--accent-blue);}
 
 .bulk-action-bar{display:flex;align-items:center;gap:10px;padding:10px 28px;background:rgba(0,115,234,0.12);
@@ -125,7 +125,7 @@ tr.drag-over-row{box-shadow:inset 0 2px 0 var(--accent-blue);}
   user-select:none;}
 .subitem-toggle:hover{color:var(--text);}
 .subitem-count{font-size:10px;font-weight:700;}
-tr.subitem-row td{background:var(--bg-app);}
+table.board-table tr.subitem-row td{background:var(--bg-app);}
 .subitem-name-cell{padding-left:30px!important;font-size:12.5px;color:var(--text-dim);}
 
 .rating-cell{gap:2px;cursor:default;}
@@ -143,14 +143,23 @@ tr.subitem-row td{background:var(--bg-app);}
 @keyframes toast-in{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
 
 table.board-table{border-collapse:collapse;}
-table.board-table th{position:sticky;top:0;background:var(--bg-header);text-align:left;font-size:11px;
+table.board-table th{position:sticky;top:0;z-index:3;background:var(--bg-header);text-align:left;font-size:11px;
   font-weight:700;color:var(--text-dim);padding:10px 12px;border-bottom:1px solid var(--border);white-space:nowrap;}
 table.board-table td{padding:0;background:var(--bg-row);border-bottom:1px solid var(--border);vertical-align:middle;}
 table.board-table .item-name-cell{padding:9px 12px;font-size:13px;font-weight:600;min-width:220px;color:var(--text);
   border-left:4px solid var(--gcolor,#579bfc);cursor:text;}
 table.board-table .item-name-cell:focus{outline:2px solid var(--accent-blue);outline-offset:-2px;}
-.cell{width:140px;height:36px;display:flex;align-items:center;padding:0 8px;cursor:pointer;font-size:13px;
-  border-right:1px solid var(--border);position:relative;color:var(--text);}
+
+/* Freeze the leading select/drag-handle/expand/item-name columns so a wide
+   board's row identity stays put while scrolling horizontally through its
+   columns — the same behavior monday.com itself has. */
+table.board-table th:nth-child(-n+4){position:sticky;left:0;z-index:4;}
+table.board-table td:nth-child(-n+4){position:sticky;left:0;z-index:1;}
+table.board-table th:nth-child(2),table.board-table td:nth-child(2){left:30px;}
+table.board-table th:nth-child(3),table.board-table td:nth-child(3){left:52px;}
+table.board-table th:nth-child(4),table.board-table td:nth-child(4){left:72px;}
+.cell{width:100%;box-sizing:border-box;height:36px;display:flex;align-items:center;padding:0 8px;cursor:pointer;
+  font-size:13px;border-right:1px solid var(--border);position:relative;color:var(--text);}
 .cell:hover{background:var(--bg-row-hover);}
 .cell input[type=text],.cell input[type=number],.cell input[type=date]{width:100%;border:none;background:transparent;
   font-size:13px;outline:none;font-family:inherit;color:var(--text);}
@@ -275,6 +284,8 @@ table.board-table .item-name-cell:focus{outline:2px solid var(--accent-blue);out
 th:hover .th-menu-btn{opacity:1;}
 .th-menu-btn:hover{background:var(--bg-row-hover);color:var(--text);}
 .th-sort-indicator{font-size:10px;color:var(--accent-blue);}
+.col-resize-handle{position:absolute;top:0;right:-6px;bottom:0;width:11px;cursor:col-resize;z-index:1;}
+.col-resize-handle:hover,.col-resize-handle.resizing{background:rgba(0,115,234,0.35);}
 
 .row-menu-btn{width:100%;height:100%;display:flex;align-items:center;justify-content:center;cursor:pointer;
   color:transparent;font-size:15px;font-weight:900;}
@@ -367,6 +378,41 @@ tr.footer-row .footer-label{padding:9px 12px;font-size:11px;text-transform:upper
 .cal-add{font-size:11px;color:var(--text-faint);cursor:pointer;margin-top:4px;opacity:0;}
 .cal-cell:hover .cal-add{opacity:1;}
 .cal-add:hover{color:var(--text);}
+
+/* ── Timeline (Gantt) view ─────────────────────────────────────────────── */
+.tl-header-row{display:flex;position:sticky;top:0;z-index:5;background:var(--bg-header);
+  border-bottom:1px solid var(--border);}
+.tl-header-spacer{width:240px;flex-shrink:0;position:sticky;left:0;z-index:6;background:var(--bg-header);
+  border-right:1px solid var(--border);font-size:11px;font-weight:700;color:var(--text-dim);
+  padding:10px 12px;display:flex;align-items:center;}
+.tl-header-months{display:flex;}
+.tl-month{flex-shrink:0;box-sizing:border-box;padding:9px 12px;font-size:12px;font-weight:800;
+  color:var(--text-dim);border-right:1px solid var(--border);white-space:nowrap;}
+.tl-row{display:flex;border-bottom:1px solid var(--border);}
+.tl-namecell{width:240px;flex-shrink:0;position:sticky;left:0;z-index:2;background:var(--bg-row);
+  font-size:13px;font-weight:600;color:var(--text);padding:9px 12px;border-right:1px solid var(--border);
+  border-left:4px solid var(--gcolor,#579bfc);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  cursor:pointer;}
+.tl-group-row{border-bottom:none;}
+.tl-group-namecell{background:var(--bg-app);font-size:14px;font-weight:800;border-left:4px solid var(--gcolor,#579bfc);
+  cursor:default;}
+/* Week gridlines every 7 days — 30px/day matches TIMELINE_DAY_WIDTH in board.js. */
+.tl-lane{position:relative;flex-shrink:0;height:44px;background-image:
+    repeating-linear-gradient(to right, transparent 0, transparent 209px, var(--border) 209px, var(--border) 210px);}
+.tl-group-row .tl-lane{height:32px;background:var(--bg-app);background-image:none;}
+.tl-today-line{position:absolute;top:0;bottom:0;width:2px;background:var(--accent-blue);z-index:1;pointer-events:none;}
+.tl-bar{position:absolute;top:8px;height:28px;border-radius:5px;display:flex;align-items:center;
+  padding:0 8px;font-size:11px;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;cursor:grab;box-shadow:0 1px 3px rgba(0,0,0,0.3);user-select:none;}
+.tl-bar:active{cursor:grabbing;}
+.tl-bar-label{overflow:hidden;text-overflow:ellipsis;pointer-events:none;}
+.tl-bar-handle{position:absolute;top:0;bottom:0;width:8px;cursor:ew-resize;}
+.tl-bar-handle-l{left:0;}
+.tl-bar-handle-r{right:0;}
+.tl-bar-empty-hint{position:absolute;left:8px;top:11px;font-size:11px;color:var(--text-faint);
+  cursor:pointer;opacity:0;}
+.tl-row:hover .tl-bar-empty-hint{opacity:1;}
+.tl-bar-empty-hint:hover{color:var(--text);}
 
 /* ── Time tracking column ──────────────────────────────────────────────── */
 .time-cell{gap:8px;}

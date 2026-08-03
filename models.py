@@ -93,6 +93,7 @@ VIEW_TYPES = {
     "table":     {"label": "Table"},
     "kanban":    {"label": "Kanban"},
     "calendar":  {"label": "Calendar"},
+    "timeline":  {"label": "Timeline"},
     "dashboard": {"label": "Dashboard"},
 }
 
