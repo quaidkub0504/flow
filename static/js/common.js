@@ -193,7 +193,7 @@ function renderSearchDropdown(data){
     }
     if (data.items.length) {
       html += `<div class="search-group-label">Items</div>` + data.items.map(i => `
-        <a class="search-result" href="/board/${i.board_id}">
+        <a class="search-result" href="/board/${i.board_id}?item=${i.id}">
           <span>${esc_(i.name)}</span><span class="search-result-sub">${esc_(i.board_name)}</span>
         </a>`).join('');
     }
@@ -227,12 +227,15 @@ async function toggleBellPanel(){
   panel.innerHTML = `<div class="bell-hdr">Notifications</div><div class="activity-empty">Loading…</div>`;
   const r = await fetch('/api/activity?limit=25');
   const rows = await r.json();
-  panel.innerHTML = `<div class="bell-hdr">Notifications</div>` + (rows.length ? rows.map(r => `
-    <div class="activity-row">
+  panel.innerHTML = `<div class="bell-hdr">Notifications</div>` + (rows.length ? rows.map(r => {
+    const href = `/board/${r.board_id}${r.item_id ? `?item=${r.item_id}` : ''}`;
+    return `
+    <a class="activity-row" href="${href}">
       <b>${esc_(r.user_name)}</b> ${esc_(ACTIVITY_ACTION_TEXT[r.action] || r.action)}
       ${r.detail ? '— ' + esc_(r.detail) : ''} <span style="color:var(--text-faint);">in ${esc_(r.board_name)}</span>
       <div class="activity-time">${timeAgo(r.created_at)}</div>
-    </div>`).join('') : `<div class="activity-empty">No activity yet.</div>`);
+    </a>`;
+  }).join('') : `<div class="activity-empty">No activity yet.</div>`);
 }
 
 // ── Command palette (Ctrl/Cmd+K) — quick nav + fuzzy jump to any board or
@@ -288,7 +291,7 @@ function renderCommandPaletteResults(q, data){
   addSection('Actions', actions, a => a, a => `<span class="cmd-result-icon">${a.icon}</span><span>${esc_(a.label)}</span>`);
   addSection('Boards', data.boards || [], b => ({label: b.name, href: `/board/${b.id}`}),
     b => `<span class="cmd-result-icon">${esc_(b.icon)}</span><span>${esc_(b.name)}</span>`);
-  addSection('Items', data.items || [], i => ({label: i.name, href: `/board/${i.board_id}`}),
+  addSection('Items', data.items || [], i => ({label: i.name, href: `/board/${i.board_id}?item=${i.id}`}),
     i => `<span class="cmd-result-icon">▤</span><span>${esc_(i.name)}</span><span class="cmd-result-sub">${esc_(i.board_name)}</span>`);
   const results = document.getElementById('cmdPaletteResults');
   results.innerHTML = CMD_ITEMS.length ? html : `<div class="cmd-palette-empty">No matches</div>`;

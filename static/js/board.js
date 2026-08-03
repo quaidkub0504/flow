@@ -56,6 +56,13 @@ async function init(){
       closeAllMenus();
     }
   });
+
+  // Deep link support — the bell panel, command palette, and global search
+  // all send item results here as /board/{id}?item={item_id} so clicking
+  // a notification or search hit opens straight to that item's detail
+  // panel instead of just landing on the board and making you find it.
+  const deepLinkItemId = Number(new URLSearchParams(window.location.search).get('item'));
+  if (deepLinkItemId && STATE.items.some(i => i.id === deepLinkItemId)) openUpdates(deepLinkItemId);
 }
 
 function connectSocket(){
@@ -1815,6 +1822,7 @@ function removeFileEntry(itemId, columnId, idx){
 
 async function openUpdates(itemId){
   const item = STATE.items.find(i => i.id === itemId);
+  if (!item) return;
   const panel = document.getElementById('updatesPanel');
   panel.dataset.itemId = itemId;
   panel.style.display = 'flex';
@@ -1949,7 +1957,7 @@ async function openActivityLog(){
     </div>`;
   const rows = await fetch(`/api/activity?board_id=${BOARD_ID}&limit=200`).then(r => r.json());
   document.getElementById('activityLogList').innerHTML = rows.length ? rows.map(r => `
-    <div class="update-item">
+    <div class="update-item" ${r.item_id ? `style="cursor:pointer;" onclick="closeActivityLog(); openUpdates(${r.item_id});"` : ''}>
       <div class="update-meta"><b>${esc(r.user_name)}</b> ${esc(ACTIVITY_ACTION_TEXT[r.action] || r.action)}
         · ${timeAgo(r.created_at)}</div>
       ${r.detail ? `<div class="update-body">${esc(r.detail)}</div>` : ''}
