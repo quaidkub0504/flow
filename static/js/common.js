@@ -119,10 +119,18 @@ async function populateBoardTemplateSelect(){
   const templates = await fetch('/api/board_templates').then(r => r.json());
   sel.innerHTML = templates.map(t => `<option value="${t.key}">${esc_(t.label)}</option>`).join('');
 }
+function populateNewBoardFolderSelect(){
+  const sel = document.getElementById('newBoardFolder');
+  if (!sel) return;
+  const folders = typeof SB_FOLDERS !== 'undefined' ? SB_FOLDERS : [];
+  sel.innerHTML = '<option value="">No folder</option>' +
+    folders.map(f => `<option value="${f.id}">${esc_(f.name)}</option>`).join('');
+}
 function openNewBoardModal(){
   document.getElementById('newBoardModal').style.display = 'flex';
   document.getElementById('newBoardName').focus();
   populateBoardTemplateSelect();
+  populateNewBoardFolderSelect();
 }
 function closeNewBoardModal(){
   document.getElementById('newBoardModal').style.display = 'none';
@@ -132,9 +140,11 @@ async function submitNewBoard(){
   const name = document.getElementById('newBoardName').value.trim();
   if (!name) return;
   const template = document.getElementById('newBoardTemplate').value;
+  const folderSel = document.getElementById('newBoardFolder');
+  const folder_id = folderSel && folderSel.value ? parseInt(folderSel.value, 10) : null;
   const r = await fetch('/api/boards', {
     method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({name, template})
+    body: JSON.stringify({name, template, folder_id})
   });
   const board = await r.json();
   window.location.href = '/board/' + board.id;

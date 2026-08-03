@@ -26,8 +26,9 @@
 <div class="modal-backdrop" id="newBoardModal" style="display:none;">
   <div class="modal">
     <div class="modal-hdr">Create a Board</div>
-    <input id="newBoardName" placeholder="Board name"/>
+    <input id="newBoardName" placeholder="Board name" onkeydown="if(event.key==='Enter'){event.preventDefault(); submitNewBoard();}"/>
     <select id="newBoardTemplate"></select>
+    <select id="newBoardFolder"><option value="">No folder</option></select>
     <div class="modal-actions">
       <button class="btn-ghost" onclick="closeNewBoardModal()">Cancel</button>
       <button class="btn-primary" onclick="submitNewBoard()">Create</button>
@@ -37,11 +38,22 @@
 
 <div class="modal-backdrop" id="newFolderModal" style="display:none;">
   <div class="modal">
-    <div class="modal-hdr">New Folder</div>
-    <input id="newFolderName" placeholder="Folder name" autofocus/>
+    <div class="modal-hdr" id="newFolderModalHdr">New Folder</div>
+    <input id="newFolderName" placeholder="Folder name" autofocus onkeydown="if(event.key==='Enter'){event.preventDefault(); submitNewFolder();}"/>
     <div class="modal-actions">
       <button class="btn-ghost" onclick="closeNewFolderModal()">Cancel</button>
-      <button class="btn-primary" onclick="submitNewFolder()">Create</button>
+      <button class="btn-primary" id="newFolderSubmitBtn" onclick="submitNewFolder()">Create</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="confirmModal" style="display:none;">
+  <div class="modal">
+    <div class="modal-hdr" id="confirmModalHdr">Are you sure?</div>
+    <div id="confirmModalBody" style="font-size:13px;color:var(--text-dim);margin-bottom:6px;"></div>
+    <div class="modal-actions">
+      <button class="btn-ghost" onclick="closeConfirmModal()">Cancel</button>
+      <button class="btn-primary" id="confirmModalOkBtn" style="background:#e2445c;">Delete</button>
     </div>
   </div>
 </div>
@@ -63,9 +75,16 @@ function sbToggleFolder(folderId){
 
 function sbBoardLink(b){
   const currentPath = window.location.pathname;
-  return `<a class="sidebar-board-link ${currentPath === '/board/'+b.id ? 'active' : ''}" href="/board/${b.id}">
-      <span class="sb-icon">${b.icon}</span>${b.name.length > 20 ? b.name.slice(0,20)+'…' : b.name}
-    </a>`;
+  return `<div class="sidebar-board-row">
+      <a class="sidebar-board-link ${currentPath === '/board/'+b.id ? 'active' : ''}" href="/board/${b.id}" onclick="return sbBoardLinkClick(event, this)">
+        <span class="sb-icon">${b.icon}</span><span class="sidebar-board-link-name" data-board-id="${b.id}">${b.name.length > 20 ? sbEsc(b.name.slice(0,20))+'…' : sbEsc(b.name)}</span>
+      </a>
+      <button class="icon-btn-sm sb-row-menu-btn" onclick="sbOpenBoardMenu(event, ${b.id})" title="Board options">⋮</button>
+    </div>`;
+}
+function sbBoardLinkClick(evt, a){
+  if (a.querySelector('[contenteditable="true"]')) { evt.preventDefault(); return false; }
+  return true;
 }
 
 function renderSidebar(){
@@ -86,10 +105,12 @@ function renderSidebar(){
     const collapsed = !!collapse[f.id];
     return `
       <div class="folder-row" onclick="sbToggleFolder(${f.id})">
-        <span class="folder-arrow ${collapsed ? 'collapsed' : ''}">▼</span>${sbEsc(f.name)}
+        <span class="folder-arrow ${collapsed ? 'collapsed' : ''}">▼</span>
+        <span class="folder-name">${sbEsc(f.name)}</span>
+        <button class="icon-btn-sm sb-row-menu-btn" onclick="sbOpenFolderMenu(event, ${f.id})" title="Folder options">⋮</button>
       </div>
       <div class="folder-boards ${collapsed ? 'collapsed' : ''}" style="padding-left:14px;">
-        ${boards.length ? boards.map(sbBoardLink).join('') : '<div style="padding:4px 20px;color:var(--text-faint);font-size:12px;">Empty</div>'}
+        ${boards.length ? boards.map(sbBoardLink).join('') : '<div style="padding:4px 20px;color:var(--text-faint);font-size:12px;">Empty — move a board here via its ⋮ menu</div>'}
       </div>`;
   }).join('');
   document.getElementById('sidebarBoardList').innerHTML = html;
@@ -105,22 +126,172 @@ async function loadSidebarBoards(){
   renderSidebar();
 }
 
+let SB_EDIT_FOLDER_ID = null;
 function openNewFolderModal(){
+  SB_EDIT_FOLDER_ID = null;
+  document.getElementById('newFolderModalHdr').textContent = 'New Folder';
+  document.getElementById('newFolderSubmitBtn').textContent = 'Create';
+  document.getElementById('newFolderName').value = '';
   document.getElementById('newFolderModal').style.display = 'flex';
   document.getElementById('newFolderName').focus();
+}
+function sbOpenRenameFolderModal(folderId){
+  sbCloseMenus();
+  const folder = SB_FOLDERS.find(f => f.id === folderId);
+  if (!folder) return;
+  SB_EDIT_FOLDER_ID = folderId;
+  document.getElementById('newFolderModalHdr').textContent = 'Rename Folder';
+  document.getElementById('newFolderSubmitBtn').textContent = 'Save';
+  document.getElementById('newFolderName').value = folder.name;
+  document.getElementById('newFolderModal').style.display = 'flex';
+  const input = document.getElementById('newFolderName');
+  input.focus();
+  input.select();
 }
 function closeNewFolderModal(){
   document.getElementById('newFolderModal').style.display = 'none';
   document.getElementById('newFolderName').value = '';
+  SB_EDIT_FOLDER_ID = null;
 }
 async function submitNewFolder(){
   const name = document.getElementById('newFolderName').value.trim();
   if (!name) return;
-  await fetch('/api/folders', {
-    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name})
-  });
+  if (SB_EDIT_FOLDER_ID) {
+    await fetch(`/api/folders/${SB_EDIT_FOLDER_ID}`, {
+      method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name})
+    });
+  } else {
+    await fetch('/api/folders', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name})
+    });
+  }
   closeNewFolderModal();
   loadSidebarBoards();
+}
+function sbDeleteFolder(folderId){
+  sbCloseMenus();
+  const folder = SB_FOLDERS.find(f => f.id === folderId);
+  if (!folder) return;
+  confirmAction('Delete folder', `Delete "${folder.name}"? Its boards will move to the top level — they won't be deleted.`, 'Delete', async () => {
+    await fetch(`/api/folders/${folderId}`, {method: 'DELETE'});
+    loadSidebarBoards();
+  });
+}
+
+// ── Per-row "⋮" menus for boards and folders — rename, move, duplicate, ─────
+// archive, delete, all without leaving the sidebar or opening the board.
+function sbCloseMenus(){ document.querySelectorAll('.sb-menu').forEach(m => m.remove()); }
+document.addEventListener('click', (e) => { if (!e.target.closest('.sb-menu') && !e.target.closest('.sb-row-menu-btn')) sbCloseMenus(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') sbCloseMenus(); });
+
+function sbOpenMenuAt(evt, html){
+  evt.stopPropagation();
+  sbCloseMenus();
+  const rect = evt.currentTarget.getBoundingClientRect();
+  const menu = document.createElement('div');
+  menu.className = 'menu sb-menu';
+  menu.style.position = 'fixed';
+  menu.style.top = (rect.bottom + 4) + 'px';
+  menu.style.left = Math.min(rect.left, window.innerWidth - 200) + 'px';
+  menu.innerHTML = html;
+  document.body.appendChild(menu);
+}
+
+function sbOpenFolderMenu(evt, folderId){
+  sbOpenMenuAt(evt, `
+    <div class="menu-item" onclick="sbOpenRenameFolderModal(${folderId})">✎ Rename</div>
+    <div class="menu-sep"></div>
+    <div class="menu-item danger" onclick="sbDeleteFolder(${folderId})">🗑 Delete folder</div>
+  `);
+}
+
+function sbOpenBoardMenu(evt, boardId){
+  const board = SB_BOARDS.find(b => b.id === boardId);
+  if (!board) return;
+  const folderItems = SB_FOLDERS.filter(f => f.id !== board.folder_id)
+    .map(f => `<div class="menu-item" onclick="sbMoveBoardToFolder(${boardId}, ${f.id})">📁 ${sbEsc(f.name)}</div>`).join('');
+  const noFolderItem = board.folder_id
+    ? `<div class="menu-item" onclick="sbMoveBoardToFolder(${boardId}, null)">— No folder</div>` : '';
+  sbOpenMenuAt(evt, `
+    <div class="menu-item" onclick="sbRenameBoard(${boardId})">✎ Rename</div>
+    <div class="menu-item" onclick="sbToggleStarBoard(${boardId})">${board.starred ? '☆ Unfavorite' : '★ Favorite'}</div>
+    <div class="menu-item" onclick="sbDuplicateBoard(${boardId})">⎘ Duplicate</div>
+    ${(folderItems || noFolderItem) ? `<div class="menu-sep"></div><div class="filter-col-name" style="padding:6px 10px 2px;">Move to folder</div>${noFolderItem}${folderItems}` : ''}
+    <div class="menu-sep"></div>
+    <div class="menu-item" onclick="sbArchiveBoard(${boardId})">🗄 Archive</div>
+    <div class="menu-item danger" onclick="sbDeleteBoard(${boardId})">🗑 Delete</div>
+  `);
+}
+function sbRenameBoard(boardId){
+  sbCloseMenus();
+  const board = SB_BOARDS.find(b => b.id === boardId);
+  const nameEl = document.querySelector(`.sidebar-board-link-name[data-board-id="${boardId}"]`);
+  if (!board || !nameEl) return;
+  const original = board.name;
+  nameEl.textContent = original;
+  nameEl.setAttribute('contenteditable', 'true');
+  nameEl.focus();
+  document.execCommand('selectAll', false, null);
+  const finish = async (commit) => {
+    nameEl.removeEventListener('blur', onBlur);
+    nameEl.removeEventListener('keydown', onKeydown);
+    const trimmed = nameEl.textContent.trim();
+    if (commit && trimmed && trimmed !== original) {
+      await fetch(`/api/boards/${boardId}`, {
+        method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name: trimmed})
+      });
+    }
+    loadSidebarBoards();
+  };
+  const onBlur = () => finish(true);
+  const onKeydown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); nameEl.blur(); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  };
+  nameEl.addEventListener('blur', onBlur);
+  nameEl.addEventListener('keydown', onKeydown);
+}
+async function sbToggleStarBoard(boardId){
+  sbCloseMenus();
+  const board = SB_BOARDS.find(b => b.id === boardId);
+  if (!board) return;
+  await fetch(`/api/boards/${boardId}`, {
+    method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({starred: !board.starred})
+  });
+  loadSidebarBoards();
+}
+async function sbDuplicateBoard(boardId){
+  sbCloseMenus();
+  await fetch(`/api/boards/${boardId}/duplicate`, {method: 'POST'});
+  loadSidebarBoards();
+}
+async function sbMoveBoardToFolder(boardId, folderId){
+  sbCloseMenus();
+  await fetch(`/api/boards/${boardId}`, {
+    method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({folder_id: folderId})
+  });
+  loadSidebarBoards();
+}
+function sbArchiveBoard(boardId){
+  sbCloseMenus();
+  const board = SB_BOARDS.find(b => b.id === boardId);
+  if (!board) return;
+  confirmAction('Archive board', `Archive "${board.name}"? You can restore it later from the Archived Boards section on My Boards.`, 'Archive', async () => {
+    await fetch(`/api/boards/${boardId}`, {
+      method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({archived: true})
+    });
+    loadSidebarBoards();
+  });
+}
+function sbDeleteBoard(boardId){
+  sbCloseMenus();
+  const board = SB_BOARDS.find(b => b.id === boardId);
+  if (!board) return;
+  confirmAction('Delete board', `Delete "${board.name}" permanently? This can't be undone.`, 'Delete', async () => {
+    await fetch(`/api/boards/${boardId}`, {method: 'DELETE'});
+    if (window.location.pathname === '/board/' + boardId) { window.location.href = '/'; return; }
+    loadSidebarBoards();
+  });
 }
 
 loadSidebarBoards();

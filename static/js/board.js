@@ -250,10 +250,65 @@ function render(){
 function renderTabs(){
   const el = document.getElementById('boardTabs');
   el.innerHTML = STATE.views.map(v => `
-    <span class="board-tab ${v.id === STATE.currentViewId ? 'active' : ''}" onclick="switchView(${v.id})">${esc(v.name)}</span>
+    <span class="board-tab-wrap">
+      <span class="board-tab ${v.id === STATE.currentViewId ? 'active' : ''}" data-view-id="${v.id}"
+            onclick="if(!this.isContentEditable) switchView(${v.id})">${esc(v.name)}</span>
+      <button class="board-tab-menu-btn" onclick="openViewMenu(event, ${v.id})" title="View options">⋮</button>
+    </span>
   `).join('') + `<span class="board-tab-add" onclick="openNewViewModal()">+</span>`;
 }
 function switchView(viewId){ STATE.currentViewId = viewId; render(); }
+
+function openViewMenu(evt, viewId){
+  const view = STATE.views.find(v => v.id === viewId);
+  if (!view) return;
+  openMenuAt(evt, `
+    <div class="menu-item" onclick="renameView(${viewId})">✎ Rename</div>
+    ${STATE.views.length > 1 ? `<div class="menu-sep"></div><div class="menu-item danger" onclick="deleteView(${viewId})">🗑 Delete view</div>` : ''}
+  `);
+}
+function renameView(viewId){
+  closeAllMenus();
+  const view = STATE.views.find(v => v.id === viewId);
+  const tabEl = document.querySelector(`.board-tab[data-view-id="${viewId}"]`);
+  if (!view || !tabEl) return;
+  const original = view.name;
+  tabEl.setAttribute('contenteditable', 'true');
+  tabEl.focus();
+  document.execCommand('selectAll', false, null);
+  const finish = async (commit) => {
+    tabEl.removeEventListener('blur', onBlur);
+    tabEl.removeEventListener('keydown', onKeydown);
+    const trimmed = tabEl.textContent.trim();
+    if (commit && trimmed && trimmed !== original) {
+      const r = await fetch(`/api/views/${viewId}`, {
+        method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name: trimmed})
+      });
+      const updated = await r.json();
+      view.name = updated.name;
+    }
+    render();
+  };
+  const onBlur = () => finish(true);
+  const onKeydown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); tabEl.blur(); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  };
+  tabEl.addEventListener('blur', onBlur);
+  tabEl.addEventListener('keydown', onKeydown);
+}
+function deleteView(viewId){
+  closeAllMenus();
+  if (STATE.views.length <= 1) return;
+  const view = STATE.views.find(v => v.id === viewId);
+  if (!view) return;
+  confirmAction('Delete view', `Delete the "${view.name}" view? This can't be undone.`, 'Delete', async () => {
+    await fetch(`/api/views/${viewId}`, {method: 'DELETE'});
+    STATE.views = STATE.views.filter(v => v.id !== viewId);
+    if (STATE.currentViewId === viewId) STATE.currentViewId = STATE.views[0].id;
+    render();
+  });
+}
 
 // ── Table view ────────────────────────────────────────────────────────────
 
