@@ -13,6 +13,15 @@ function timeAgo(iso){
 }
 function esc_(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
+// True while focus is somewhere the user is actively typing — every
+// single-key shortcut below must check this first so "n" in an item name
+// or "/" in a URL field never gets hijacked.
+function isTypingTarget(el){
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !!el.isContentEditable;
+}
+
 // ── Confirm modal (every page that needs a blocking "are you sure?") ────
 // Requires a #confirmModal backdrop with #confirmModalHdr/#confirmModalBody/
 // #confirmModalOkBtn in the page markup.
@@ -291,4 +300,34 @@ document.addEventListener('keydown', (e) => {
   const bd = document.getElementById('cmdPaletteBackdrop');
   if (!bd) return;
   if (bd.style.display === 'flex') closeCommandPalette(); else openCommandPalette();
+});
+
+// ── Single-key shortcuts (/, n, ?) — Linear/Notion/GitHub convention ────
+// Only "/" search-focus, "n" new-item, and "?" help; deliberately no
+// multi-key chords (g+h etc.) to keep the surface small and predictable.
+function openShortcutsModal(){
+  if (typeof closeAllMenus === 'function') closeAllMenus();
+  const m = document.getElementById('shortcutsModal');
+  if (m) m.style.display = 'flex';
+}
+function closeShortcutsModal(){
+  const m = document.getElementById('shortcutsModal');
+  if (m) m.style.display = 'none';
+}
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (isTypingTarget(e.target)) return;
+
+  if (e.key === '/') {
+    e.preventDefault();
+    const input = document.getElementById('globalSearchInput');
+    if (input) input.focus();
+  } else if (e.key === 'n' || e.key === 'N') {
+    e.preventDefault();
+    if (typeof focusFirstAddItem === 'function') focusFirstAddItem();
+    else if (typeof openNewBoardModal === 'function') openNewBoardModal();
+  } else if (e.key === '?') {
+    e.preventDefault();
+    openShortcutsModal();
+  }
 });

@@ -8,6 +8,7 @@
     <div id="searchDropdown" class="search-dropdown" style="display:none;"></div>
   </div>
   <div class="topbar-actions">
+    <button class="bell-btn" onclick="openShortcutsModal()" title="Keyboard shortcuts (?)">⌨</button>
     <button class="bell-btn" onclick="toggleBellPanel()" title="Notifications">🔔</button>
     <div id="bellPanel" class="bell-panel" style="display:none;"></div>
     <div class="user-chip" style="background:{{ user.color }};" title="{{ user.name }}">{{ user.name[0]|upper }}</div>
@@ -25,5 +26,21 @@
       <span class="cmd-palette-hint">Esc</span>
     </div>
     <div class="cmd-palette-results" id="cmdPaletteResults"></div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="shortcutsModal" style="display:none;">
+  <div class="modal" style="width:380px;">
+    <div class="modal-hdr">Keyboard Shortcuts</div>
+    <div class="shortcuts-list">
+      <div class="shortcuts-row"><span class="shortcuts-keys"><kbd>Ctrl</kbd>/<kbd>⌘</kbd><kbd>K</kbd></span><span>Quick actions — jump to a board or item</span></div>
+      <div class="shortcuts-row"><span class="shortcuts-keys"><kbd>/</kbd></span><span>Focus search</span></div>
+      <div class="shortcuts-row"><span class="shortcuts-keys"><kbd>N</kbd></span><span>New item (or new board, outside a board)</span></div>
+      <div class="shortcuts-row"><span class="shortcuts-keys"><kbd>Esc</kbd></span><span>Close whatever's open</span></div>
+      <div class="shortcuts-row"><span class="shortcuts-keys"><kbd>?</kbd></span><span>Show this list</span></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-primary" onclick="closeShortcutsModal()">Got it</button>
+    </div>
   </div>
 </div>

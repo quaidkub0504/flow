@@ -293,6 +293,14 @@ table.board-table th:nth-child(4),table.board-table td:nth-child(4){left:72px;}
 .cmd-result-icon{width:18px;text-align:center;flex-shrink:0;}
 .cmd-palette-empty{padding:20px;text-align:center;color:var(--text-faint);font-size:13px;}
 
+/* ── Keyboard shortcuts help modal ──────────────────────────────────────── */
+.shortcuts-list{display:flex;flex-direction:column;gap:12px;margin:6px 0 16px;}
+.shortcuts-row{display:flex;align-items:center;gap:12px;font-size:13px;color:var(--text-dim);}
+.shortcuts-keys{flex-shrink:0;min-width:78px;display:flex;gap:3px;align-items:center;}
+.shortcuts-row kbd{background:var(--bg-app);border:1px solid var(--border);border-radius:5px;
+  padding:2px 7px;font-size:11px;font-family:inherit;color:var(--text);min-width:18px;text-align:center;
+  box-shadow:0 1px 0 var(--border);}
+
 /* ── Generic dropdown menu (column header, row actions, board settings) ── */
 .menu{position:absolute;background:var(--bg-header);border:1px solid var(--border);border-radius:8px;
   box-shadow:0 8px 28px rgba(0,0,0,0.45);z-index:250;min-width:170px;padding:6px;}
