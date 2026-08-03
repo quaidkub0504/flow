@@ -1,4 +1,5 @@
-<div class="sidebar">
+<div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeMobileSidebar()"></div>
+<div class="sidebar" id="sidebarEl">
   <div class="sidebar-logo"><a href="/"><img src="/static/img/logo.png" alt="AJ Danboise" class="sidebar-logo-img"/></a></div>
   <button class="new-board-btn" onclick="openNewBoardModal()">+ New Board</button>
   <a href="/my-work" class="sidebar-board-link {{ 'active' if request.path == '/my-work' else '' }}">

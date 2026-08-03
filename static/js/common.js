@@ -43,7 +43,25 @@ document.addEventListener('keydown', (e) => {
   if (typeof closeUpdates === 'function') closeUpdates();
   if (typeof closeCommandPalette === 'function') closeCommandPalette();
   document.querySelectorAll('.modal-backdrop').forEach(m => { m.style.display = 'none'; });
+  closeMobileSidebar();
 });
+
+// ── Mobile off-canvas sidebar — below 860px the fixed rail is hidden by
+// default (see app.css); the hamburger button in _topbar.html toggles it.
+function toggleMobileSidebar(){
+  const sidebar = document.getElementById('sidebarEl');
+  const backdrop = document.getElementById('sidebarBackdrop');
+  if (!sidebar || !backdrop) return;
+  const opening = !sidebar.classList.contains('mobile-open');
+  sidebar.classList.toggle('mobile-open', opening);
+  backdrop.classList.toggle('show', opening);
+}
+function closeMobileSidebar(){
+  const sidebar = document.getElementById('sidebarEl');
+  const backdrop = document.getElementById('sidebarBackdrop');
+  if (sidebar) sidebar.classList.remove('mobile-open');
+  if (backdrop) backdrop.classList.remove('show');
+}
 
 // ── Undo toast — for reversible, frequent actions (item/column/group
 // delete) where a grace period beats a blocking confirm dialog. Nothing
