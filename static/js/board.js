@@ -45,6 +45,7 @@ async function init(){
   document.getElementById('boardStarBtn').classList.toggle('starred', !!STATE.board.starred);
 
   render();
+  updateToolbarActiveStates();
   connectSocket();
   wireBoardTitleEdit();
   wireBoardDescEdit();
@@ -1613,9 +1614,55 @@ function updateToolbarActiveStates(){
   const filterBtn = document.getElementById('filterBtn');
   const sortBtn = document.getElementById('sortBtn');
   const hideBtn = document.getElementById('hideBtn');
+  const personBtn = document.getElementById('personBtn');
   if (filterBtn) filterBtn.classList.toggle('active-filter', Object.values(FILTER_STATE).some(s => s.size));
   if (sortBtn) sortBtn.classList.toggle('active-filter', !!SORT_STATE.columnId);
   if (hideBtn) hideBtn.classList.toggle('active-filter', HIDDEN_COLS.size > 0);
+  if (personBtn) {
+    const personCol = STATE.columns.find(c => c.type === 'person');
+    personBtn.style.display = personCol ? '' : 'none';
+    personBtn.classList.toggle('active-filter', !!(personCol && FILTER_STATE[personCol.id] && FILTER_STATE[personCol.id].size));
+  }
+}
+
+// ── "Person" toolbar shortcut — a one-click filter to a teammate's own
+// items, same shortcut monday's own toolbar has next to the search box,
+// instead of opening the full Filter panel just to check one person. ──
+function togglePersonQuickFilter(evt){
+  evt.stopPropagation();
+  if (document.getElementById('personQuickPanel')) { closeAllMenus(); return; }
+  closeAllMenus();
+  const personCol = STATE.columns.find(c => c.type === 'person');
+  if (!personCol) return;
+  const rect = evt.currentTarget.getBoundingClientRect();
+  const panel = document.createElement('div');
+  panel.id = 'personQuickPanel';
+  panel.className = 'picker app-menu';
+  panel.style.position = 'fixed'; panel.style.top = (rect.bottom+6)+'px'; panel.style.left = rect.left+'px';
+  panel.innerHTML = buildPersonQuickPanelHtml(personCol.id);
+  document.body.appendChild(panel);
+}
+function buildPersonQuickPanelHtml(colId){
+  const selected = FILTER_STATE[colId] || new Set();
+  return (ALL_USERS.map(u => `
+    <div class="picker-option ${selected.has(u.id)?'selected':''}" onclick="togglePersonQuickChip(${colId}, ${u.id})">
+      <span class="picker-swatch" style="background:${u.color};border-radius:50%;"></span>${esc(u.name)}
+    </div>`).join('')) || `<div style="padding:8px;color:var(--text-faint);font-size:12px;">No teammates yet.</div>`;
+}
+function togglePersonQuickChip(colId, userId){
+  if (!FILTER_STATE[colId]) FILTER_STATE[colId] = new Set();
+  const set = FILTER_STATE[colId];
+  if (set.has(userId)) set.delete(userId); else set.add(userId);
+  updateToolbarActiveStates();
+  render();
+  // Same deferred-refresh reasoning as the main filter panel: replacing
+  // the panel's innerHTML synchronously here would detach the clicked
+  // option from the document mid-bubble and trip the "click outside a
+  // menu" listener into closing it.
+  setTimeout(() => {
+    const panel = document.getElementById('personQuickPanel');
+    if (panel) panel.innerHTML = buildPersonQuickPanelHtml(colId);
+  }, 0);
 }
 
 // ── Column modal ─────────────────────────────────────────────────────────
