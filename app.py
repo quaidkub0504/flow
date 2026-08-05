@@ -63,6 +63,21 @@ app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25MB per uploaded file â€
 ASSET_VERSION = os.getenv("RAILWAY_DEPLOYMENT_ID") or uuid.uuid4().hex[:10]
 app.jinja_env.globals["ASSET_VERSION"] = ASSET_VERSION
 
+
+def _initials(name):
+    """First+last name initials for an avatar chip ("Kevin King" -> "KK"),
+    falling back to a single letter for a one-word name â€” matches the
+    two-letter avatar convention monday's own UI uses."""
+    parts = (name or "").split()
+    if not parts:
+        return "?"
+    if len(parts) == 1:
+        return parts[0][0].upper()
+    return (parts[0][0] + parts[-1][0]).upper()
+
+
+app.jinja_env.filters["initials"] = _initials
+
 _secret = os.getenv("FLASK_SECRET_KEY")
 if not _secret:
     _secret = os.urandom(32).hex()

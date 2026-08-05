@@ -12,7 +12,7 @@
     <button class="bell-btn" onclick="openShortcutsModal()" title="Keyboard shortcuts (?)">⌨</button>
     <button class="bell-btn" onclick="toggleBellPanel()" title="Notifications">🔔</button>
     <div id="bellPanel" class="bell-panel" style="display:none;"></div>
-    <div class="user-chip" style="background:{{ user.color }};" title="{{ user.name }}">{{ user.name[0]|upper }}</div>
+    <div class="user-chip" style="background:{{ user.color }};" title="{{ user.name }}">{{ user.name|initials }}</div>
   </div>
 </div>
 

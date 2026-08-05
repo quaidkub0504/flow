@@ -479,7 +479,7 @@ function renderCell(item, col){
       const ids = val.user_ids || [];
       const users = ids.map(uid => ALL_USERS.find(u => u.id === uid)).filter(Boolean);
       return `<div class="cell" onclick="openPersonPicker(event, ${item.id}, ${col.id})">
-        ${users.length ? `<div class="avatar-stack">${users.map(u => `<div class="avatar" style="background:${u.color};" title="${esc(u.name)}">${esc(u.name[0].toUpperCase())}</div>`).join('')}</div>` : `<div class="avatar avatar-placeholder">+</div>`}
+        ${users.length ? `<div class="avatar-stack">${users.map(u => `<div class="avatar" style="background:${u.color};" title="${esc(u.name)}">${esc(initials(u.name))}</div>`).join('')}</div>` : `<div class="avatar avatar-placeholder">+</div>`}
       </div>`;
     }
     case 'date': {
@@ -597,7 +597,7 @@ function renderKanbanCard(item){
   if (personCol) {
     const ids = (item.values[personCol.id]||{}).user_ids || [];
     const users = ids.map(uid => ALL_USERS.find(u => u.id === uid)).filter(Boolean);
-    if (users.length) avatarsHtml = `<div class="avatar-stack">${users.map(u => `<div class="avatar" style="background:${u.color};width:22px;height:22px;font-size:10px;">${esc(u.name[0].toUpperCase())}</div>`).join('')}</div>`;
+    if (users.length) avatarsHtml = `<div class="avatar-stack">${users.map(u => `<div class="avatar" style="background:${u.color};width:22px;height:22px;font-size:10px;">${esc(initials(u.name))}</div>`).join('')}</div>`;
   }
   return `<div class="kanban-card" onclick="openUpdates(${item.id})">
     <div class="kanban-card-name">${esc(item.name)}</div>

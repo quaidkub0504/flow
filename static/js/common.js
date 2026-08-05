@@ -12,6 +12,15 @@ function timeAgo(iso){
   return new Date(iso).toLocaleDateString('en-US', {month:'short', day:'numeric'});
 }
 function esc_(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// First+last name initials for an avatar chip ("Kevin King" -> "KK"),
+// falling back to a single letter for a one-word name — matches the
+// two-letter avatar convention monday's own UI uses.
+function initials(name){
+  const parts = (name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  if (parts.length === 1) return parts[0][0].toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
 // True while focus is somewhere the user is actively typing — every
 // single-key shortcut below must check this first so "n" in an item name

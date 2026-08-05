@@ -80,7 +80,7 @@ async function loadTeam(){
         ${TEAM.map(u => `
           <tr>
             <td class="item-name-cell" style="border-left:none;display:flex;align-items:center;gap:10px;">
-              <div class="avatar" style="background:${u.color};margin-left:0;">${esc_(u.name[0].toUpperCase())}</div>
+              <div class="avatar" style="background:${u.color};margin-left:0;">${esc_(initials(u.name))}</div>
               ${esc_(u.name)}${u.id===USER.id ? ' (you)' : ''}
             </td>
             <td style="padding:9px 12px;color:var(--text-dim);">${esc_(u.email)}</td>
