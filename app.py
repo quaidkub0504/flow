@@ -16,9 +16,10 @@ import sys
 import csv
 import io
 import uuid
+import secrets
 import smtplib
 import threading
-from datetime import timedelta
+from datetime import timedelta, datetime
 from email.mime.text import MIMEText
 from email.utils import formataddr
 from werkzeug.utils import secure_filename
@@ -154,6 +155,7 @@ def _migrate_schema():
     insp = inspect(db.engine)
     existing_board_cols = {c["name"] for c in insp.get_columns("boards")}
     existing_item_cols = {c["name"] for c in insp.get_columns("items")}
+    existing_user_cols = {c["name"] for c in insp.get_columns("users")}
     with db.engine.begin() as conn:
         if "folder_id" not in existing_board_cols:
             conn.execute(text("ALTER TABLE boards ADD COLUMN folder_id INTEGER"))
@@ -161,6 +163,10 @@ def _migrate_schema():
             conn.execute(text("ALTER TABLE boards ADD COLUMN starred BOOLEAN DEFAULT 0"))
         if "parent_id" not in existing_item_cols:
             conn.execute(text("ALTER TABLE items ADD COLUMN parent_id INTEGER"))
+        if "reset_token" not in existing_user_cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN reset_token VARCHAR(64)"))
+        if "reset_token_expires" not in existing_user_cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN reset_token_expires DATETIME"))
     db.create_all()  # picks up brand-new tables (folders, views)
 
     # Backfill a default "Main table" view for any board that predates the
@@ -186,7 +192,9 @@ def current_user():
 
 @app.before_request
 def require_login():
-    if request.path.startswith("/static/") or request.path in ("/login", "/logout", "/api/login", "/setup", "/api/setup"):
+    if (request.path.startswith("/static/") or request.path.startswith("/reset-password/")
+            or request.path in ("/login", "/logout", "/api/login", "/setup", "/api/setup",
+                                 "/forgot-password", "/api/forgot-password", "/api/reset-password")):
         return
     uid = session.get("user_id")
     # Also reject a session pointing at a user that no longer exists — e.g. an
@@ -245,6 +253,61 @@ def api_login():
         session["user_id"] = user.id
         return jsonify({"success": True})
     return jsonify({"error": "Incorrect email or password"}), 401
+
+
+@app.route("/forgot-password", methods=["GET"])
+def forgot_password_page():
+    return render_template("forgot_password.html")
+
+
+@app.route("/api/forgot-password", methods=["POST"])
+def api_forgot_password():
+    data = request.get_json(force=True)
+    email = (data.get("email") or "").strip().lower()
+    user = User.query.filter_by(email=email).first() if email else None
+    if user:
+        user.reset_token = secrets.token_urlsafe(32)
+        # Naive UTC, not tz-aware — SQLite drops tzinfo on round-trip, so a
+        # stored aware datetime comes back naive on the next read and blows
+        # up comparing against a fresh tz-aware datetime.
+        user.reset_token_expires = datetime.utcnow() + timedelta(hours=1)
+        db.session.commit()
+        link = f"{APP_BASE_URL}/reset-password/{user.reset_token}"
+        send_email_async(
+            user.email, "Reset your Danboise Flow password",
+            f"Someone (hopefully you) asked to reset the password on your Danboise Flow account.\n\n"
+            f"Reset it here: {link}\n\nThis link expires in 1 hour. "
+            f"If you didn't request this, you can ignore this email — your password hasn't changed.",
+        )
+    # Same response whether or not the email matched — otherwise this page
+    # becomes a way to fish for which emails have an account.
+    return jsonify({"success": True})
+
+
+@app.route("/reset-password/<token>", methods=["GET"])
+def reset_password_page(token):
+    user = User.query.filter_by(reset_token=token).first()
+    valid = bool(user and user.reset_token_expires and user.reset_token_expires > datetime.utcnow())
+    return render_template("reset_password.html", token=token, valid=valid)
+
+
+@app.route("/api/reset-password", methods=["POST"])
+def api_reset_password():
+    data = request.get_json(force=True)
+    token = data.get("token") or ""
+    password = data.get("password") or ""
+    user = User.query.filter_by(reset_token=token).first()
+    if not user or not user.reset_token_expires or user.reset_token_expires <= datetime.utcnow():
+        return jsonify({"error": "This reset link has expired or is invalid. Request a new one."}), 400
+    if len(password) < 8:
+        return jsonify({"error": "Password must be at least 8 characters"}), 400
+    user.set_password(password)
+    user.reset_token = None
+    user.reset_token_expires = None
+    db.session.commit()
+    session.permanent = True
+    session["user_id"] = user.id
+    return jsonify({"success": True})
 
 
 @app.route("/logout")

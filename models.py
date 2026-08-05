@@ -128,6 +128,8 @@ class User(db.Model):
     color = db.Column(db.String(20), nullable=False, default="#579bfc")  # avatar color
     is_admin = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime(timezone=True), default=_now)
+    reset_token = db.Column(db.String(64), nullable=True)
+    reset_token_expires = db.Column(db.DateTime(timezone=True), nullable=True)
 
     def set_password(self, raw):
         self.password_hash = generate_password_hash(raw)
