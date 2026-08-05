@@ -166,8 +166,9 @@ function connectSocket(){
   socket.on('update_posted', (upd) => {
     const panel = document.getElementById('updatesPanel');
     if (panel.dataset.itemId == upd.item_id) appendUpdateToPanel(upd);
+    const item = STATE.items.find(i => i.id === upd.item_id);
+    if (item) { item.update_count = (item.update_count || 0) + 1; render(); }
     if (upd.user && upd.user.id !== USER.id) {
-      const item = STATE.items.find(i => i.id === upd.item_id);
       if (upd.mentioned_user_ids && upd.mentioned_user_ids.includes(USER.id)) {
         fireDesktopNotification(`${upd.user.name} mentioned you`, item ? item.name : 'An item was updated');
       } else {
@@ -351,7 +352,7 @@ function renderTableView(){
 function renderGroup(group){
   const items = itemsForGroup(group.id);
   return `
-    <div class="group-block" data-group-id="${group.id}"
+    <div class="group-block" data-group-id="${group.id}" style="--gcolor:${group.color};"
          ondragover="onGroupDragOver(event)" ondrop="onGroupDrop(event, ${group.id})">
       <div class="group-hdr" onclick="toggleGroup(${group.id})">
         <span class="drag-handle" draggable="true" onclick="event.stopPropagation();"
@@ -378,6 +379,7 @@ function renderTable(group, items){
         <th style="width:22px;"></th>
         <th style="width:20px;"></th>
         <th style="min-width:240px;">Item</th>
+        <th style="width:40px;" title="Updates"></th>
         ${cols.map(c => `
           <th style="width:${c.width}px;" data-col-id="${c.id}">
             <div class="th-wrap">
@@ -432,6 +434,7 @@ function renderRow(group, item){
           onblur="saveItemName(${item.id}, this)"
           onkeydown="if(event.key==='Enter'){event.preventDefault(); this.blur();}"
           ondblclick="openUpdates(${item.id})">${esc(item.name)}</td>
+      <td>${renderUpdatesCell(item)}</td>
       ${cols.map(col => `<td style="width:${col.width}px;" data-col-id="${col.id}">${renderCell(item, col)}</td>`).join('')}
       <td><div class="row-menu-btn" onclick="openRowMenu(event, ${item.id})">⋮</div></td>
     </tr>`;
@@ -448,11 +451,18 @@ function renderSubitemRow(group, child){
           onblur="saveItemName(${child.id}, this)"
           onkeydown="if(event.key==='Enter'){event.preventDefault(); this.blur();}"
           ondblclick="openUpdates(${child.id})">${esc(child.name)}</td>
+      <td>${renderUpdatesCell(child)}</td>
       ${cols.map(col => `<td style="width:${col.width}px;" data-col-id="${col.id}">${renderCell(child, col)}</td>`).join('')}
       <td><div class="row-menu-btn" onclick="openRowMenu(event, ${child.id})">⋮</div></td>
     </tr>`;
 }
 
+function renderUpdatesCell(item){
+  const count = item.update_count || 0;
+  return `<div class="cell updates-cell" onclick="openUpdates(${item.id})" title="Updates">
+    ${count ? `<span class="updates-badge">💬 ${count}</span>` : `<span class="updates-add">+</span>`}
+  </div>`;
+}
 function renderCell(item, col){
   const val = item.values[col.id] || {};
   switch (col.type) {
@@ -460,8 +470,8 @@ function renderCell(item, col){
     case 'priority': {
       const labels = col.settings.labels || [];
       const label = labels.find(l => l.id === val.label_id);
-      return `<div class="cell" onclick="openLabelPicker(event, ${item.id}, ${col.id})">
-        ${label ? `<span class="pill" style="background:${label.color};">${esc(label.text)}</span>` : `<span class="pill empty"></span>`}
+      return `<div class="cell status-cell" onclick="openLabelPicker(event, ${item.id}, ${col.id})">
+        ${label ? `<span class="status-pill" style="background:${label.color};">${esc(label.text)}</span>` : `<span class="pill empty"></span>`}
       </div>`;
     }
     case 'person': {

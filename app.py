@@ -36,7 +36,7 @@ from flask import Flask, request, jsonify, render_template, session, redirect, R
 from flask_socketio import SocketIO, join_room, emit
 from dotenv import load_dotenv
 
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, text, func
 
 from models import (
     db, User, Board, Group, Column, Item, ColumnValue, Update, ActivityLog, Folder, View, Automation,
@@ -423,7 +423,20 @@ def api_board_detail(board_id):
 
     groups = [g.to_dict() for g in board.groups]
     columns = [c.to_dict() for c in board.columns]
-    items = [i.to_dict() for i in Item.query.filter_by(board_id=board_id).order_by(Item.position).all()]
+    # One aggregate query for every item's update count, instead of an N+1 —
+    # the table view shows this as a small "💬 N" badge per row.
+    update_counts = dict(
+        db.session.query(Update.item_id, func.count(Update.id))
+        .join(Item, Update.item_id == Item.id)
+        .filter(Item.board_id == board_id)
+        .group_by(Update.item_id)
+        .all()
+    )
+    items = []
+    for i in Item.query.filter_by(board_id=board_id).order_by(Item.position).all():
+        d = i.to_dict()
+        d["update_count"] = update_counts.get(i.id, 0)
+        items.append(d)
     views = [v.to_dict() for v in board.views]
     return jsonify({"board": board.to_dict(), "groups": groups, "columns": columns, "items": items, "views": views})
 

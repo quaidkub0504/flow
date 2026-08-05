@@ -103,7 +103,8 @@ html,body{height:100%;background:var(--bg-app);color:var(--text);}
 
 .board-scroll{overflow-x:auto;padding:20px 28px 60px;}
 .group-block{margin-bottom:26px;min-width:max-content;}
-.group-hdr{display:flex;align-items:center;gap:8px;padding:8px 4px;cursor:pointer;user-select:none;}
+.group-hdr{display:flex;align-items:center;gap:8px;padding:8px 4px 8px 8px;cursor:pointer;user-select:none;
+  border-left:4px solid var(--gcolor,transparent);}
 .group-collapse-arrow{font-size:10px;color:var(--text-dim);transition:transform .1s;width:12px;}
 .group-collapse-arrow.collapsed{transform:rotate(-90deg);}
 .group-name{font-size:15px;font-weight:800;outline:none;border-radius:4px;padding:0 2px;}
@@ -154,7 +155,7 @@ table.board-table th{position:sticky;top:0;z-index:3;background:var(--bg-header)
   font-weight:700;color:var(--text-dim);padding:10px 12px;border-bottom:1px solid var(--border);white-space:nowrap;}
 table.board-table td{padding:0;background:var(--bg-row);border-bottom:1px solid var(--border);vertical-align:middle;}
 table.board-table .item-name-cell{padding:9px 12px;font-size:13px;font-weight:600;min-width:220px;color:var(--text);
-  border-left:4px solid var(--gcolor,#579bfc);cursor:text;}
+  cursor:text;}
 table.board-table .item-name-cell:focus{outline:2px solid var(--accent-blue);outline-offset:-2px;}
 
 /* Freeze the leading select/drag-handle/expand/item-name columns so a wide
@@ -165,9 +166,18 @@ table.board-table td:nth-child(-n+4){position:sticky;left:0;z-index:1;}
 table.board-table th:nth-child(2),table.board-table td:nth-child(2){left:30px;}
 table.board-table th:nth-child(3),table.board-table td:nth-child(3){left:52px;}
 table.board-table th:nth-child(4),table.board-table td:nth-child(4){left:72px;}
+/* The group's color as a continuous "spine" at the table's true left edge
+   (header row through every item row) — monday's own visual signature for
+   which group a row belongs to, replacing the old per-row accent that only
+   started at the item-name column. */
+table.board-table th:nth-child(1),table.board-table td:nth-child(1){border-left:4px solid var(--gcolor,transparent);}
 .cell{width:100%;box-sizing:border-box;height:36px;display:flex;align-items:center;padding:0 8px;cursor:pointer;
   font-size:13px;border-right:1px solid var(--border);position:relative;color:var(--text);}
 .cell:hover{background:var(--bg-row-hover);}
+.updates-cell{justify-content:center;color:var(--text-faint);}
+.updates-badge{font-size:11px;color:var(--text-dim);font-weight:600;white-space:nowrap;}
+.updates-add{opacity:0;font-weight:800;font-size:15px;}
+tr:hover .updates-add{opacity:1;}
 .cell input[type=text],.cell input[type=number],.cell input[type=date]{width:100%;border:none;background:transparent;
   font-size:13px;outline:none;font-family:inherit;color:var(--text);}
 .cell input[type=date]{color-scheme:dark;}
@@ -184,6 +194,13 @@ table.board-table th:nth-child(4),table.board-table td:nth-child(4){left:72px;}
 .pill{display:inline-block;padding:0 10px;border-radius:5px;font-size:12px;font-weight:700;color:#fff;
   height:28px;line-height:28px;width:100%;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .pill.empty{background:var(--pill-empty);}
+/* Status/priority get their own edge-to-edge block instead of an inset
+   pill — matches monday's own solid-color status cells (color fills the
+   whole cell, not just a rounded chip inside it). */
+.status-cell{padding:0;}
+.status-pill{display:flex;align-items:center;justify-content:center;width:100%;height:100%;padding:0 10px;
+  font-size:12px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.status-cell .pill.empty{height:100%;border-radius:0;}
 .avatar-stack{display:flex;gap:-4px;}
 .avatar{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;
   color:#fff;font-weight:800;font-size:11px;border:2px solid var(--bg-row);margin-left:-6px;}
